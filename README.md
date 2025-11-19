@@ -1,43 +1,27 @@
-## Elementor Submission Re‑Trigger Tool
-Contributors: Custom Extension
-Donate link: https://example.com/donate
-Tags: elementor, forms, bulk, re‑trigger, cron, logs
+=== Elementor Pro Submission Re-Trigger Tool ===
+Contributors: dExIT
+Tags: elementor, form, submission, retrigger, webhook
 Requires at least: 6.0
-Tested up to: 6.5
-Stable tag: 10.0.0
+Tested up to: 6.4
+Stable tag: 1.0.0
+Requires PHP: 7.4
 License: GPLv2 or later
-License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
+Bulk re-trigger Elementor Pro form actions (Webhooks, Emails) and edit submission payloads.
 
-## Description
-This plugin adds a powerful tool to the Elementor admin menu that lets you:
-* Select any number of form submissions
-* Edit the payload before re‑triggering
-* Choose which Elementor actions to run (webhook, email, etc.)
-* View a live queue with status icons
-* Log every action, success or failure, with full debug info
-* Schedule daily cleanup of old logs
-* Manual cleanup from the settings page
+== Description ==
 
-## Installation
-1. Upload the `elementor-retrigger-tool` folder to `/wp-content/plugins/`.
-2. Activate the plugin from the Plugins page.
-3. Go to **Elementor → Re‑Trigger Tool** to start using it.
+A powerful tool to bulk re-trigger Elementor Pro form actions.
 
-## Frequently Asked Questions
-**Q: Does this work with Elementor Free?**  
-A: No, it requires Elementor Pro because it uses the Pro form submission API.
+**Key Features:**
+*   **Bulk Re-Trigger:** Select multiple submissions and re-run actions in a queue.
+*   **Edit Payload:** Modify submission data before re-sending (creates a new submission record).
+*   **Visual Queue:** Watch the progress of your re-triggering tasks.
+*   **Detailed Logs:** View full JSON payloads and HTTP error codes for failed webhooks.
+*   **Auto-Cleanup:** Automatically cleans up logs to keep your database optimized.
 
-**Q: Can I run the tool on a staging site?**  
-A: Absolutely. The plugin is safe to use on any WordPress installation that has Elementor Pro.
+== Installation ==
 
-**Q: How do I change the log retention period?**  
-A: Go to **Elementor → Re‑Trigger Tool → Settings** and set the desired number of days.
-
-## Changelog
-* 10.0.0 – Initial release (full payload logging, cron cleanup, visual queue, modal editing, auto‑save).
-
-## Upgrade Notice
-* 10.0.0 – No breaking changes. All data is preserved.
-
+1. Upload the plugin files to the `/wp-content/plugins/elementor-retrigger-tool` directory.
+2. Activate the plugin through the 'Plugins' screen.
+3. Go to **Elementor > Re-Trigger Tool** to start using it.
