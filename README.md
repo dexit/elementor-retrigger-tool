@@ -1,4 +1,4 @@
-=== Elementor Pro Submission Re-Trigger Tool ===
+# Elementor Pro Submission Re-Trigger Tool ===
 Contributors: dExIT
 Tags: elementor, form, submission, retrigger, webhook
 Requires at least: 6.0
@@ -9,7 +9,7 @@ License: GPLv2 or later
 
 Bulk re-trigger Elementor Pro form actions (Webhooks, Emails) and edit submission payloads.
 
-== Description ==
+## Description ==
 
 A powerful tool to bulk re-trigger Elementor Pro form actions.
 
@@ -20,7 +20,7 @@ A powerful tool to bulk re-trigger Elementor Pro form actions.
 *   **Detailed Logs:** View full JSON payloads and HTTP error codes for failed webhooks.
 *   **Auto-Cleanup:** Automatically cleans up logs to keep your database optimized.
 
-== Installation ==
+## Installation ==
 
 1. Upload the plugin files to the `/wp-content/plugins/elementor-retrigger-tool` directory.
 2. Activate the plugin through the 'Plugins' screen.
