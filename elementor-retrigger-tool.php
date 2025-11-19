@@ -1,14 +1,15 @@
 <?php
 /**
- * Plugin Name: Elementor Pro Submission Re-Trigger Tool
- * Plugin URI:  https://github.com/dexit/elementor-retrigger-tool
+ * Plugin Name: ERT Pro Form Submission Re-Trigger Tool
+ * Plugin URI:  https://github.com/dexit/ert-retrigger-tool
  * Description: Bulk re-trigger tool for Elementor Pro Forms. Edit payloads, view logs, and re-execute Webhooks/Emails.
  * Version:     1.0.0
  * Author:      Rihards 'dExIT' Mantejs
  * Author URI:  https://github.com/dexit
- * Text Domain: elementor-retrigger-tool
+ * Text Domain: ert-retrigger-tool
  * Domain Path: /languages
  * License:     GPL-2.0+
+ * Tags: elementor,forms,submissions,submission,elementor-pro
  * Requires PHP: 7.4
  * Requires at least: 6.0
  */
@@ -44,7 +45,7 @@ class ERT_Retrigger_Tool {
 	public function admin_notice_missing_elementor() {
 		?>
 		<div class="notice notice-error">
-			<p><?php esc_html_e( 'Elementor Re-Trigger Tool requires Elementor Pro to be installed and active.', 'elementor-retrigger-tool' ); ?></p>
+			<p><?php esc_html_e( 'Elementor Re-Trigger Tool requires Elementor Pro to be installed and active.', 'ert-retrigger-tool' ); ?></p>
 		</div>
 		<?php
 	}
@@ -69,7 +70,7 @@ class ERT_Retrigger_Tool {
 	}
 
 	public function load_textdomain() {
-		load_plugin_textdomain( 'elementor-retrigger-tool', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+		load_plugin_textdomain( 'ert-retrigger-tool', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 	}
 
 	public function activate_plugin() {
@@ -133,27 +134,27 @@ class ERT_Retrigger_Tool {
 			if ( ! empty( $_POST['manual_cleanup_days'] ) ) {
 				$days = absint( $_POST['manual_cleanup_days'] );
 				$this->run_cleanup_query( $days );
-				add_settings_error( 'ert_retrigger', 'cleanup', sprintf( __( 'Cleanup executed for logs older than %d days.', 'elementor-retrigger-tool' ), $days ), 'updated' );
+				add_settings_error( 'ert_retrigger', 'cleanup', sprintf( __( 'Cleanup executed for logs older than %d days.', 'ert-retrigger-tool' ), $days ), 'updated' );
 			} else {
-				add_settings_error( 'ert_retrigger', 'saved', __( 'Settings saved.', 'elementor-retrigger-tool' ), 'updated' );
+				add_settings_error( 'ert_retrigger', 'saved', __( 'Settings saved.', 'ert-retrigger-tool' ), 'updated' );
 			}
 		}
 	}
 
 	public function register_admin_menu() {
-		add_submenu_page( 'elementor', __( 'Re-Trigger Tool', 'elementor-retrigger-tool' ), __( 'Re-Trigger Tool', 'elementor-retrigger-tool' ), 'manage_options', self::PAGE_SLUG, [ $this, 'render_main_wrapper' ] );
+		add_submenu_page( 'elementor', __( 'Re-Trigger Tool', 'ert-retrigger-tool' ), __( 'Re-Trigger Tool', 'ert-retrigger-tool' ), 'manage_options', self::PAGE_SLUG, [ $this, 'render_main_wrapper' ] );
 	}
 
 	public function render_main_wrapper() {
 		$active_tab = isset( $_GET['tab'] ) ? sanitize_text_field( $_GET['tab'] ) : 'run';
 		?>
 		<div class="wrap">
-			<h1 class="wp-heading-inline"><?php esc_html_e( 'Elementor Submission Re-Trigger Tool', 'elementor-retrigger-tool' ); ?></h1>
+			<h1 class="wp-heading-inline"><?php esc_html_e( 'Elementor Submission Re-Trigger Tool', 'ert-retrigger-tool' ); ?></h1>
 			<hr class="wp-header-end">
 			<nav class="nav-tab-wrapper">
-				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=run" class="nav-tab <?php echo $active_tab == 'run' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Run Tool', 'elementor-retrigger-tool' ); ?></a>
-				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=logs" class="nav-tab <?php echo $active_tab == 'logs' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Logs & History', 'elementor-retrigger-tool' ); ?></a>
-				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Settings', 'elementor-retrigger-tool' ); ?></a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=run" class="nav-tab <?php echo $active_tab == 'run' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Run Tool', 'ert-retrigger-tool' ); ?></a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=logs" class="nav-tab <?php echo $active_tab == 'logs' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Logs & History', 'ert-retrigger-tool' ); ?></a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e( 'Settings', 'ert-retrigger-tool' ); ?></a>
 			</nav>
 			<div style="margin-top: 20px;">
 				<?php 
@@ -174,36 +175,36 @@ class ERT_Retrigger_Tool {
 		<div class="card" style="max-width: 600px; padding: 20px;">
 			<form method="post" action="">
 				<?php wp_nonce_field( 'ert_settings', 'ert_nonce' ); ?>
-				<h3><?php esc_html_e( 'Automated Cleanup', 'elementor-retrigger-tool' ); ?></h3>
-				<p><?php esc_html_e( 'The system automatically deletes old logs once daily.', 'elementor-retrigger-tool' ); ?></p>
+				<h3><?php esc_html_e( 'Automated Cleanup', 'ert-retrigger-tool' ); ?></h3>
+				<p><?php esc_html_e( 'The system automatically deletes old logs once daily.', 'ert-retrigger-tool' ); ?></p>
 				<table class="form-table">
 					<tr>
-						<th scope="row"><?php esc_html_e( 'Retention Policy', 'elementor-retrigger-tool' ); ?></th>
+						<th scope="row"><?php esc_html_e( 'Retention Policy', 'ert-retrigger-tool' ); ?></th>
 						<td>
 							<select name="retention_days">
-								<option value="7" <?php selected( $current_retention, 7 ); ?>><?php esc_html_e( '1 Week', 'elementor-retrigger-tool' ); ?></option>
-								<option value="30" <?php selected( $current_retention, 30 ); ?>><?php esc_html_e( '1 Month', 'elementor-retrigger-tool' ); ?></option>
-								<option value="90" <?php selected( $current_retention, 90 ); ?>><?php esc_html_e( '3 Months', 'elementor-retrigger-tool' ); ?></option>
-								<option value="365" <?php selected( $current_retention, 365 ); ?>><?php esc_html_e( '1 Year', 'elementor-retrigger-tool' ); ?></option>
-								<option value="0" <?php selected( $current_retention, 0 ); ?>><?php esc_html_e( 'Keep Forever', 'elementor-retrigger-tool' ); ?></option>
+								<option value="7" <?php selected( $current_retention, 7 ); ?>><?php esc_html_e( '1 Week', 'ert-retrigger-tool' ); ?></option>
+								<option value="30" <?php selected( $current_retention, 30 ); ?>><?php esc_html_e( '1 Month', 'ert-retrigger-tool' ); ?></option>
+								<option value="90" <?php selected( $current_retention, 90 ); ?>><?php esc_html_e( '3 Months', 'ert-retrigger-tool' ); ?></option>
+								<option value="365" <?php selected( $current_retention, 365 ); ?>><?php esc_html_e( '1 Year', 'ert-retrigger-tool' ); ?></option>
+								<option value="0" <?php selected( $current_retention, 0 ); ?>><?php esc_html_e( 'Keep Forever', 'ert-retrigger-tool' ); ?></option>
 							</select>
 						</td>
 					</tr>
 				</table>
 				<hr>
-				<h3><?php esc_html_e( 'Manual Cleanup', 'elementor-retrigger-tool' ); ?></h3>
+				<h3><?php esc_html_e( 'Manual Cleanup', 'ert-retrigger-tool' ); ?></h3>
 				<div style="display:flex; gap:10px; align-items:center;">
 					<select name="manual_cleanup_days">
-						<option value=""><?php esc_html_e( '-- Select Action --', 'elementor-retrigger-tool' ); ?></option>
-						<option value="7"><?php esc_html_e( 'Delete older than 1 Week', 'elementor-retrigger-tool' ); ?></option>
-						<option value="30"><?php esc_html_e( 'Delete older than 1 Month', 'elementor-retrigger-tool' ); ?></option>
-						<option value="1"><?php esc_html_e( 'Delete older than 1 Day', 'elementor-retrigger-tool' ); ?></option>
-						<option value="0"><?php esc_html_e( 'Delete ALL Logs', 'elementor-retrigger-tool' ); ?></option>
+						<option value=""><?php esc_html_e( '-- Select Action --', 'ert-retrigger-tool' ); ?></option>
+						<option value="7"><?php esc_html_e( 'Delete older than 1 Week', 'ert-retrigger-tool' ); ?></option>
+						<option value="30"><?php esc_html_e( 'Delete older than 1 Month', 'ert-retrigger-tool' ); ?></option>
+						<option value="1"><?php esc_html_e( 'Delete older than 1 Day', 'ert-retrigger-tool' ); ?></option>
+						<option value="0"><?php esc_html_e( 'Delete ALL Logs', 'ert-retrigger-tool' ); ?></option>
 					</select>
-					<input type="submit" name="ert_save_settings" class="button button-secondary" value="<?php esc_attr_e( 'Run Cleanup Now', 'elementor-retrigger-tool' ); ?>">
+					<input type="submit" name="ert_save_settings" class="button button-secondary" value="<?php esc_attr_e( 'Run Cleanup Now', 'ert-retrigger-tool' ); ?>">
 				</div>
 				<hr>
-				<p class="submit"><input type="submit" name="ert_save_settings" class="button button-primary" value="<?php esc_attr_e( 'Save Settings', 'elementor-retrigger-tool' ); ?>"></p>
+				<p class="submit"><input type="submit" name="ert_save_settings" class="button button-primary" value="<?php esc_attr_e( 'Save Settings', 'ert-retrigger-tool' ); ?>"></p>
 			</form>
 		</div>
 		<?php
@@ -236,15 +237,15 @@ class ERT_Retrigger_Tool {
 		echo '<div class="card" style="padding:0; max-width: 100%;">';
 		echo '<table class="wp-list-table widefat fixed striped">';
 		echo '<thead><tr>
-			<th width="160"><a href="'.$sort_link('created_at').'">' . esc_html__( 'Date', 'elementor-retrigger-tool' ) . '</a></th>
-			<th width="100"><a href="'.$sort_link('submission_id').'">' . esc_html__( 'Sub ID', 'elementor-retrigger-tool' ) . '</a></th>
-			<th width="150">' . esc_html__( 'Actions', 'elementor-retrigger-tool' ) . '</th>
-			<th width="100"><a href="'.$sort_link('status').'">' . esc_html__( 'Status', 'elementor-retrigger-tool' ) . '</a></th>
-			<th>' . esc_html__( 'Message / Debug Info', 'elementor-retrigger-tool' ) . '</th>
+			<th width="160"><a href="'.$sort_link('created_at').'">' . esc_html__( 'Date', 'ert-retrigger-tool' ) . '</a></th>
+			<th width="100"><a href="'.$sort_link('submission_id').'">' . esc_html__( 'Sub ID', 'ert-retrigger-tool' ) . '</a></th>
+			<th width="150">' . esc_html__( 'Actions', 'ert-retrigger-tool' ) . '</th>
+			<th width="100"><a href="'.$sort_link('status').'">' . esc_html__( 'Status', 'ert-retrigger-tool' ) . '</a></th>
+			<th>' . esc_html__( 'Message / Debug Info', 'ert-retrigger-tool' ) . '</th>
 		</tr></thead><tbody>';
 		
 		if ( empty( $logs ) ) {
-			echo '<tr><td colspan="5">' . esc_html__( 'No logs found.', 'elementor-retrigger-tool' ) . '</td></tr>';
+			echo '<tr><td colspan="5">' . esc_html__( 'No logs found.', 'ert-retrigger-tool' ) . '</td></tr>';
 		} else {
 			foreach ( $logs as $log ) {
 				$color = $log->status === 'success' ? '#46b450' : '#dc3232';
@@ -256,7 +257,7 @@ class ERT_Retrigger_Tool {
 					<td>' . esc_html( $log->actions ) . '</td>
 					<td>' . $status_badge . '</td>
 					<td><strong>' . esc_html( $log->message ) . '</strong>';
-				if ( ! empty( $log->full_debug ) ) echo '<details style="margin-top:5px;"><summary style="color:#2271b1; cursor:pointer; font-size:11px;">' . esc_html__( 'View Extended Info', 'elementor-retrigger-tool' ) . '</summary><pre style="background:#f0f0f1; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->full_debug ) . '</pre></details>';
+				if ( ! empty( $log->full_debug ) ) echo '<details style="margin-top:5px;"><summary style="color:#2271b1; cursor:pointer; font-size:11px;">' . esc_html__( 'View Extended Info', 'ert-retrigger-tool' ) . '</summary><pre style="background:#f0f0f1; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->full_debug ) . '</pre></details>';
 				echo '</td></tr>';
 			}
 		}
@@ -338,17 +339,17 @@ class ERT_Retrigger_Tool {
 					<form method="get" class="filter-bar">
 						<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
 						<input type="hidden" name="tab" value="run">
-						<strong><?php esc_html_e( 'Filter:', 'elementor-retrigger-tool' ); ?></strong>
+						<strong><?php esc_html_e( 'Filter:', 'ert-retrigger-tool' ); ?></strong>
 						<select name="filter_form">
-							<option value=""><?php esc_html_e( 'All Forms', 'elementor-retrigger-tool' ); ?></option>
+							<option value=""><?php esc_html_e( 'All Forms', 'ert-retrigger-tool' ); ?></option>
 							<?php foreach ( $unique_forms as $form_name ) : ?>
 								<option value="<?php echo esc_attr( $form_name ); ?>" <?php selected( $filter_form, $form_name ); ?>><?php echo esc_html( $form_name ); ?></option>
 							<?php endforeach; ?>
 						</select>
 						<input type="date" name="filter_date" value="<?php echo esc_attr( $filter_date ); ?>">
-						<input type="text" name="filter_search" value="<?php echo esc_attr( $filter_search ); ?>" placeholder="<?php esc_attr_e( 'Email or ID', 'elementor-retrigger-tool' ); ?>" style="width: 120px;">
-						<button type="submit" class="button"><?php esc_html_e( 'Apply', 'elementor-retrigger-tool' ); ?></button>
-						<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=run" class="button"><?php esc_html_e( 'Reset', 'elementor-retrigger-tool' ); ?></a>
+						<input type="text" name="filter_search" value="<?php echo esc_attr( $filter_search ); ?>" placeholder="<?php esc_attr_e( 'Email or ID', 'ert-retrigger-tool' ); ?>" style="width: 120px;">
+						<button type="submit" class="button"><?php esc_html_e( 'Apply', 'ert-retrigger-tool' ); ?></button>
+						<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=run" class="button"><?php esc_html_e( 'Reset', 'ert-retrigger-tool' ); ?></a>
 					</form>
 
 					<div style="max-height: 600px; overflow-y: auto;">
@@ -356,16 +357,16 @@ class ERT_Retrigger_Tool {
 							<thead>
 								<tr>
 									<td id="cb" class="manage-column column-cb check-column"><input type="checkbox" id="cb-select-all-1"></td>
-									<th width="80"><a href="<?php echo $sort_link('id'); ?>"><?php esc_html_e( 'ID', 'elementor-retrigger-tool' ); ?></a></th>
-									<th><?php esc_html_e( 'Form', 'elementor-retrigger-tool' ); ?></th>
-									<th><?php esc_html_e( 'Email / User', 'elementor-retrigger-tool' ); ?></th>
-									<th width="120"><a href="<?php echo $sort_link('created_at'); ?>"><?php esc_html_e( 'Date', 'elementor-retrigger-tool' ); ?></a></th>
-									<th width="50"><?php esc_html_e( 'Edit', 'elementor-retrigger-tool' ); ?></th>
+									<th width="80"><a href="<?php echo $sort_link('id'); ?>"><?php esc_html_e( 'ID', 'ert-retrigger-tool' ); ?></a></th>
+									<th><?php esc_html_e( 'Form', 'ert-retrigger-tool' ); ?></th>
+									<th><?php esc_html_e( 'Email / User', 'ert-retrigger-tool' ); ?></th>
+									<th width="120"><a href="<?php echo $sort_link('created_at'); ?>"><?php esc_html_e( 'Date', 'ert-retrigger-tool' ); ?></a></th>
+									<th width="50"><?php esc_html_e( 'Edit', 'ert-retrigger-tool' ); ?></th>
 								</tr>
 							</thead>
 							<tbody>
 								<?php if ( empty( $submissions ) ) : ?>
-									<tr><td colspan="6"><?php esc_html_e( 'No submissions found matching filters.', 'elementor-retrigger-tool' ); ?></td></tr>
+									<tr><td colspan="6"><?php esc_html_e( 'No submissions found matching filters.', 'ert-retrigger-tool' ); ?></td></tr>
 								<?php else : ?>
 									<?php foreach ( $submissions as $sub ) : 
 										$sub_link = admin_url( 'admin.php?page=e-form-submissions&action=view&id=' . $sub->id );
@@ -379,7 +380,7 @@ class ERT_Retrigger_Tool {
 											<td><?php echo esc_html( $sub->email ?: '-' ); ?></td>
 											<td><?php echo esc_html( date( 'Y-m-d H:i', strtotime( $sub->created_at ) ) ); ?></td>
 											<td>
-												<button type="button" class="button button-small edit-payload-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="<?php esc_attr_e( 'Edit Payload & Run', 'elementor-retrigger-tool' ); ?>">
+												<button type="button" class="button button-small edit-payload-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="<?php esc_attr_e( 'Edit Payload & Run', 'ert-retrigger-tool' ); ?>">
 													<span class="dashicons dashicons-edit" style="line-height:1.3;"></span>
 												</button>
 											</td>
@@ -398,8 +399,8 @@ class ERT_Retrigger_Tool {
 					</div>
 
 					<div style="padding: 10px; border-top: 1px solid #ccd0d4; background: #f9f9f9;">
-						<label><?php esc_html_e( 'Or Enter Manual ID:', 'elementor-retrigger-tool' ); ?> <input type="number" id="manual_id_input" class="small-text" placeholder="123"></label>
-						<button type="button" class="button" id="add_manual_btn"><?php esc_html_e( 'Add to Queue', 'elementor-retrigger-tool' ); ?></button>
+						<label><?php esc_html_e( 'Or Enter Manual ID:', 'ert-retrigger-tool' ); ?> <input type="number" id="manual_id_input" class="small-text" placeholder="123"></label>
+						<button type="button" class="button" id="add_manual_btn"><?php esc_html_e( 'Add to Queue', 'ert-retrigger-tool' ); ?></button>
 					</div>
 				</div>
 			</div>
@@ -408,11 +409,11 @@ class ERT_Retrigger_Tool {
 			<div class="col-mid">
 				<div class="card" style="padding: 0; margin: 0; height: 100%; display: flex; flex-direction: column;">
 					<div style="padding: 15px; background: #f0f0f1; border-bottom: 1px solid #ccd0d4;">
-						<strong><?php esc_html_e( '2. Queue Items', 'elementor-retrigger-tool' ); ?></strong> <span id="queue_count" style="float:right; background:#ccc; color:#fff; padding:0 5px; border-radius:10px; font-size:10px;">0</span>
+						<strong><?php esc_html_e( '2. Queue Items', 'ert-retrigger-tool' ); ?></strong> <span id="queue_count" style="float:right; background:#ccc; color:#fff; padding:0 5px; border-radius:10px; font-size:10px;">0</span>
 					</div>
 					<div style="flex: 1; overflow-y: auto;">
 						<ul id="visual_queue_container" class="queue-list">
-							<li style="color: #999; justify-content: center; padding: 20px;"><?php esc_html_e( 'Queue is empty.', 'elementor-retrigger-tool' ); ?></li>
+							<li style="color: #999; justify-content: center; padding: 20px;"><?php esc_html_e( 'Queue is empty.', 'ert-retrigger-tool' ); ?></li>
 						</ul>
 					</div>
 				</div>
@@ -421,10 +422,10 @@ class ERT_Retrigger_Tool {
 			<!-- RIGHT: Actions & Console -->
 			<div class="col-right">
 				<div class="card" style="padding: 15px; margin-bottom: 20px; margin-top:0;">
-					<h3><?php esc_html_e( '3. Select Actions', 'elementor-retrigger-tool' ); ?></h3>
+					<h3><?php esc_html_e( '3. Select Actions', 'ert-retrigger-tool' ); ?></h3>
 					<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
 						<?php if ( empty( $available_actions ) ) : ?>
-							<p><?php esc_html_e( 'No actions found.', 'elementor-retrigger-tool' ); ?></p>
+							<p><?php esc_html_e( 'No actions found.', 'ert-retrigger-tool' ); ?></p>
 						<?php else : ?>
 							<?php foreach ( $available_actions as $slug => $label ) : 
 								$checked = in_array( $slug, ['webhook', 'email'] ) ? 'checked' : '';
@@ -434,15 +435,15 @@ class ERT_Retrigger_Tool {
 						<?php endif; ?>
 					</div>
 					<br>
-					<button type="button" id="start_process_btn" class="button button-primary button-large" style="width: 100%;"><?php esc_html_e( 'Start Re-Trigger Queue', 'elementor-retrigger-tool' ); ?></button>
+					<button type="button" id="start_process_btn" class="button button-primary button-large" style="width: 100%;"><?php esc_html_e( 'Start Re-Trigger Queue', 'ert-retrigger-tool' ); ?></button>
 				</div>
 
 				<div class="card" style="padding: 0; background: #1d2327; color: #50fa7b; font-family: monospace; height: 300px; display: flex; flex-direction: column;">
 					<div style="padding: 10px; background: #2c3338; color: #fff; border-bottom: 1px solid #000;">
-						<strong><?php esc_html_e( 'Process Log', 'elementor-retrigger-tool' ); ?></strong> <span id="queue_status" style="float:right; color: #f1c40f;">Idle</span>
+						<strong><?php esc_html_e( 'Process Log', 'ert-retrigger-tool' ); ?></strong> <span id="queue_status" style="float:right; color: #f1c40f;">Idle</span>
 					</div>
 					<div id="console_output" style="flex: 1; overflow-y: auto; padding: 10px; font-size: 12px; line-height: 1.4;">
-						<div style="color: #aaa;"><?php esc_html_e( 'Waiting for input...', 'elementor-retrigger-tool' ); ?></div>
+						<div style="color: #aaa;"><?php esc_html_e( 'Waiting for input...', 'ert-retrigger-tool' ); ?></div>
 					</div>
 				</div>
 			</div>
@@ -452,13 +453,13 @@ class ERT_Retrigger_Tool {
 		<div id="edit_payload_modal" class="e-retrigger-modal">
 			<div class="e-retrigger-modal-content">
 				<span class="e-retrigger-close">&times;</span>
-				<h2><?php esc_html_e( 'Edit Submission Payload', 'elementor-retrigger-tool' ); ?></h2>
-				<p><?php esc_html_e( 'Modify the data below and run actions immediately. This will create a NEW submission record.', 'elementor-retrigger-tool' ); ?></p>
-				<div id="modal_loading" style="display:none;"><?php esc_html_e( 'Loading data...', 'elementor-retrigger-tool' ); ?></div>
+				<h2><?php esc_html_e( 'Edit Submission Payload', 'ert-retrigger-tool' ); ?></h2>
+				<p><?php esc_html_e( 'Modify the data below and run actions immediately. This will create a NEW submission record.', 'ert-retrigger-tool' ); ?></p>
+				<div id="modal_loading" style="display:none;"><?php esc_html_e( 'Loading data...', 'ert-retrigger-tool' ); ?></div>
 				<form id="modal_form">
 					<input type="hidden" id="modal_sub_id">
 					<div id="modal_fields_container" style="max-height: 300px; overflow-y: auto; margin-bottom: 15px;"></div>
-					<button type="button" id="modal_run_btn" class="button button-primary button-large"><?php esc_html_e( 'Run with Changes', 'elementor-retrigger-tool' ); ?></button>
+					<button type="button" id="modal_run_btn" class="button button-primary button-large"><?php esc_html_e( 'Run with Changes', 'ert-retrigger-tool' ); ?></button>
 				</form>
 			</div>
 		</div>
