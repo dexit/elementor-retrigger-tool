@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: ERT Pro Form Submission Re-Trigger Tool
+ * Plugin Name: Elementor Pro Submission Re-Trigger Tool
  * Plugin URI:  https://github.com/dexit/ert-retrigger-tool
  * Description: Bulk re-trigger tool for Elementor Pro Forms. Edit payloads, view logs, and re-execute Webhooks/Emails.
  * Version:     1.0.0
@@ -9,7 +9,6 @@
  * Text Domain: ert-retrigger-tool
  * Domain Path: /languages
  * License:     GPL-2.0+
- * Tags: elementor,forms,submissions,submission,elementor-pro
  * Requires PHP: 7.4
  * Requires at least: 6.0
  */
@@ -64,14 +63,9 @@ class ERT_Retrigger_Tool {
 		// Activation/Deactivation
 		register_activation_hook( __FILE__, [ $this, 'activate_plugin' ] );
 		register_deactivation_hook( __FILE__, [ $this, 'deactivate_plugin' ] );
-		
-		// i18n
-		add_action( 'init', [ $this, 'load_textdomain' ] );
 	}
 
-	public function load_textdomain() {
-		load_plugin_textdomain( 'ert-retrigger-tool', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
-	}
+	// REMOVED: load_textdomain function (WordPress.org handles this automatically now)
 
 	public function activate_plugin() {
 		$this->check_db_install();
