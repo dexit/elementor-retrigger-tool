@@ -856,10 +856,6 @@ class Elementor_Retrigger_Tool {
 		/* Handle custom fields (edit mode) */
 		if ( is_array( $custom_fields ) ) {
 			$formatted_fields = $custom_fields;
-			/* Force “Save to Database” to create a new record for edited entries */
-			if ( ! in_array( 'save-to-database', $target_actions ) ) {
-				$target_actions[] = 'save-to-database';
-			}
 		} else {
 			$values          = isset( $data['values'] ) ? $data['values'] : [];
 			$formatted_fields = [];
@@ -892,16 +888,6 @@ class Elementor_Retrigger_Tool {
 		$widget_settings = $this->find_element_settings( $elements_data, $element_id );
 		if ( ! $widget_settings ) {
 			return new WP_Error( 'no_widget', "Form Widget not found." );
-		}
-
-		/* Inject “save-to-database” into settings if we are forcing it */
-		if ( is_array( $custom_fields ) ) {
-			if ( ! isset( $widget_settings['submit_actions'] ) ) {
-				$widget_settings['submit_actions'] = [];
-			}
-			if ( ! in_array( 'save-to-database', $widget_settings['submit_actions'] ) ) {
-				$widget_settings['submit_actions'][] = 'save-to-database';
-			}
 		}
 
 		$this->sanitize_settings( $widget_settings, $element_id );
