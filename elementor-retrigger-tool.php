@@ -3,7 +3,7 @@
  * Plugin Name: Elementor Submission Re‑Trigger Tool
  * Plugin URI:  https://example.com/elementor-retrigger-tool
  * Description: Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
- * Version:     10.0.0
+ * Version:     11.0.0
  * Author:      Custom Extension
  * Author URI:  https://example.com
  * Text Domain: elementor-retrigger-tool
@@ -24,19 +24,23 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Constants
 	/* ------------------------------------------------------------------ */
-	const PAGE_SLUG          = 'e-retrigger-tool';
-	const AJAX_ACTION        = 'e_retrigger_process';
-	const AJAX_GET_DATA      = 'e_retrigger_get_data';
-	const LOG_TABLE          = 'e_retrigger_logs';
-	const OPTION_RETENTION   = 'e_retrigger_retention_days';
-	const CRON_HOOK          = 'e_retrigger_daily_cleanup_event';
-	const PER_PAGE           = 20;
+	const PAGE_SLUG             = 'e-retrigger-tool';
+	const AJAX_ACTION           = 'e_retrigger_process';
+	const AJAX_GET_DATA         = 'e_retrigger_get_data';
+	const AJAX_GET_ACTIONS      = 'e_retrigger_get_actions';
+	const LOG_TABLE             = 'e_retrigger_logs';
+	const OPTION_RETENTION      = 'e_retrigger_retention_days';
+	const CRON_HOOK             = 'e_retrigger_daily_cleanup_event';
+	const PER_PAGE              = 20;
 
 	/* ------------------------------------------------------------------ */
 	/*  Properties
 	/* ------------------------------------------------------------------ */
 	private $webhook_debug_info = '';
 	private $execution_log_buffer = '';
+	private $request_data = [];
+	private $response_data = [];
+	private $action_settings_used = [];
 
 	/* ------------------------------------------------------------------ */
 	/*  Constructor
@@ -49,6 +53,7 @@ class Elementor_Retrigger_Tool {
 		/* AJAX */
 		add_action( 'wp_ajax_' . self::AJAX_ACTION, [ $this, 'ajax_process_request' ] );
 		add_action( 'wp_ajax_' . self::AJAX_GET_DATA, [ $this, 'ajax_get_submission_data' ] );
+		add_action( 'wp_ajax_' . self::AJAX_GET_ACTIONS, [ $this, 'ajax_get_form_actions' ] );
 
 		/* Cron & Activation */
 		add_action( self::CRON_HOOK, [ $this, 'scheduled_log_cleanup' ] );
@@ -83,7 +88,7 @@ class Elementor_Retrigger_Tool {
 	/*  Database
 	/* ------------------------------------------------------------------ */
 	public function check_db_install() {
-		if ( get_option( 'e_retrigger_db_ver' ) === '1.0' ) {
+		if ( get_option( 'e_retrigger_db_ver' ) === '2.0' ) {
 			return;
 		}
 
@@ -98,6 +103,9 @@ class Elementor_Retrigger_Tool {
 			status varchar(20) NOT NULL,
 			message text NOT NULL,
 			full_debug text,
+			request_data longtext,
+			response_data longtext,
+			action_settings_used longtext,
 			created_at datetime DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY submission_id (submission_id),
@@ -107,7 +115,7 @@ class Elementor_Retrigger_Tool {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 
-		update_option( 'e_retrigger_db_ver', '1.0' );
+		update_option( 'e_retrigger_db_ver', '2.0' );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -305,9 +313,27 @@ class Elementor_Retrigger_Tool {
 					<td>' . esc_html( $log->actions ) . '</td>
 					<td>' . $status_badge . '</td>
 					<td><strong>' . esc_html( $log->message ) . '</strong>';
+
+				// Extended Debug Info
 				if ( ! empty( $log->full_debug ) ) {
 					echo '<details style="margin-top:5px;"><summary style="color:#2271b1; cursor:pointer; font-size:11px;">View Extended Info</summary><pre style="background:#f0f0f1; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->full_debug ) . '</pre></details>';
 				}
+
+				// Request Data (Raw)
+				if ( ! empty( $log->request_data ) ) {
+					echo '<details style="margin-top:5px;"><summary style="color:#0073aa; cursor:pointer; font-size:11px;">📤 View Request Data (Raw)</summary><pre style="background:#e8f5fa; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->request_data ) . '</pre></details>';
+				}
+
+				// Response Data (Raw)
+				if ( ! empty( $log->response_data ) ) {
+					echo '<details style="margin-top:5px;"><summary style="color:#0a7a0a; cursor:pointer; font-size:11px;">📥 View Response Data (Raw)</summary><pre style="background:#e8fae8; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->response_data ) . '</pre></details>';
+				}
+
+				// Action Settings Used
+				if ( ! empty( $log->action_settings_used ) ) {
+					echo '<details style="margin-top:5px;"><summary style="color:#7c3aaa; cursor:pointer; font-size:11px;">⚙️ View Action Settings Used</summary><pre style="background:#f3e8fa; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->action_settings_used ) . '</pre></details>';
+				}
+
 				echo '</td></tr>';
 			}
 		}
@@ -459,9 +485,12 @@ class Elementor_Retrigger_Tool {
 											<td><?php echo esc_html( $sub->form_name ); ?></td>
 											<td><?php echo esc_html( $sub->email ?: '-' ); ?></td>
 											<td><?php echo esc_html( date( 'Y-m-d H:i', strtotime( $sub->created_at ) ) ); ?></td>
-											<td>
+											<td style="display:flex; gap:3px;">
 												<button type="button" class="button button-small edit-payload-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="Edit Payload & Run">
 													<span class="dashicons dashicons-edit" style="line-height:1.3;"></span>
+												</button>
+												<button type="button" class="button button-small edit-actions-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="Edit Form Actions">
+													<span class="dashicons dashicons-admin-settings" style="line-height:1.3;"></span>
 												</button>
 											</td>
 										</tr>
@@ -542,12 +571,120 @@ class Elementor_Retrigger_Tool {
 			<div class="e-retrigger-modal-content">
 				<span class="e-retrigger-close">&times;</span>
 				<h2>Edit Submission Payload</h2>
-				<p>Modify the data below and run actions immediately. <strong>This will create a NEW submission record.</strong></p>
+				<p>Modify the data below and run actions immediately.</p>
 				<div id="modal_loading" style="display:none;">Loading data...</div>
 				<form id="modal_form">
 					<input type="hidden" id="modal_sub_id">
 					<div id="modal_fields_container" style="max-height:300px; overflow-y:auto; margin-bottom:15px;"></div>
 					<button type="button" id="modal_run_btn" class="button button-primary button-large">Run with Changes</button>
+				</form>
+			</div>
+		</div>
+
+		<!-- Modal for editing form actions -->
+		<div id="edit_actions_modal" class="e-retrigger-modal">
+			<div class="e-retrigger-modal-content" style="width:700px; max-width:90%;">
+				<span class="e-retrigger-close-actions">&times;</span>
+				<h2>Edit Form Action Settings</h2>
+				<p>Modify the action settings below and run with custom configuration.</p>
+				<div id="actions_modal_loading" style="display:none;">Loading data...</div>
+				<form id="actions_modal_form">
+					<input type="hidden" id="actions_modal_sub_id">
+					<div id="actions_tabs" style="margin-bottom:15px; border-bottom:1px solid #ddd;">
+						<button type="button" class="actions-tab-btn" data-tab="webhook" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Webhook</button>
+						<button type="button" class="actions-tab-btn" data-tab="email" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Email</button>
+						<button type="button" class="actions-tab-btn" data-tab="email2" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Email 2</button>
+						<button type="button" class="actions-tab-btn" data-tab="redirect" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Redirect</button>
+						<button type="button" class="actions-tab-btn" data-tab="other" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Other Actions</button>
+					</div>
+					<div id="actions_modal_content" style="max-height:400px; overflow-y:auto; margin-bottom:15px;">
+						<!-- Webhook Tab -->
+						<div class="actions-tab-content" data-tab="webhook" style="display:none;">
+							<div class="e-retrigger-field-row">
+								<label>Webhook URL</label>
+								<input type="text" name="webhook_url" placeholder="https://example.com/webhook">
+							</div>
+						</div>
+
+						<!-- Email Tab -->
+						<div class="actions-tab-content" data-tab="email" style="display:none;">
+							<div class="e-retrigger-field-row">
+								<label>Email To</label>
+								<input type="text" name="email_to" placeholder="admin@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email Subject</label>
+								<input type="text" name="email_subject" placeholder="New Form Submission">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email From</label>
+								<input type="text" name="email_from" placeholder="noreply@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email From Name</label>
+								<input type="text" name="email_from_name" placeholder="Website Name">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Reply To</label>
+								<input type="text" name="email_reply_to" placeholder="support@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>CC</label>
+								<input type="text" name="email_to_cc" placeholder="cc@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>BCC</label>
+								<input type="text" name="email_to_bcc" placeholder="bcc@example.com">
+							</div>
+						</div>
+
+						<!-- Email 2 Tab -->
+						<div class="actions-tab-content" data-tab="email2" style="display:none;">
+							<div class="e-retrigger-field-row">
+								<label>Email To (2)</label>
+								<input type="text" name="email_to_2" placeholder="admin2@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email Subject (2)</label>
+								<input type="text" name="email_subject_2" placeholder="New Form Submission">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email From (2)</label>
+								<input type="text" name="email_from_2" placeholder="noreply@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Email From Name (2)</label>
+								<input type="text" name="email_from_name_2" placeholder="Website Name">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>Reply To (2)</label>
+								<input type="text" name="email_reply_to_2" placeholder="support@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>CC (2)</label>
+								<input type="text" name="email_to_cc_2" placeholder="cc@example.com">
+							</div>
+							<div class="e-retrigger-field-row">
+								<label>BCC (2)</label>
+								<input type="text" name="email_to_bcc_2" placeholder="bcc@example.com">
+							</div>
+						</div>
+
+						<!-- Redirect Tab -->
+						<div class="actions-tab-content" data-tab="redirect" style="display:none;">
+							<div class="e-retrigger-field-row">
+								<label>Redirect URL</label>
+								<input type="text" name="redirect_to" placeholder="https://example.com/thank-you">
+							</div>
+						</div>
+
+						<!-- Other Actions Tab -->
+						<div class="actions-tab-content" data-tab="other" style="display:none;">
+							<p style="color:#666;">Additional action-specific settings can be configured here.</p>
+							<div id="other_actions_container"></div>
+						</div>
+					</div>
+					<button type="button" id="actions_modal_run_btn" class="button button-primary button-large">Run with Custom Actions</button>
 				</form>
 			</div>
 		</div>
@@ -599,7 +736,7 @@ class Elementor_Retrigger_Tool {
 			});
 
 			/* ------------------------------------------------------------------ */
-			/*  Modal logic
+			/*  Modal logic (Payload Editor)
 			/* ------------------------------------------------------------------ */
 			var modal = $('#edit_payload_modal');
 			$('.e-retrigger-close').on('click', function() {
@@ -607,6 +744,26 @@ class Elementor_Retrigger_Tool {
 			});
 			$(window).on('click', function(e) {
 				if ($(e.target).is(modal)) modal.hide();
+			});
+
+			/* ------------------------------------------------------------------ */
+			/*  Modal logic (Actions Editor)
+			/* ------------------------------------------------------------------ */
+			var actionsModal = $('#edit_actions_modal');
+			$('.e-retrigger-close-actions').on('click', function() {
+				actionsModal.hide();
+			});
+			$(window).on('click', function(e) {
+				if ($(e.target).is(actionsModal)) actionsModal.hide();
+			});
+
+			// Tab switching
+			$('.actions-tab-btn').on('click', function() {
+				var tab = $(this).data('tab');
+				$('.actions-tab-btn').css({'border-bottom-color': 'transparent', 'font-weight': 'normal'});
+				$(this).css({'border-bottom-color': '#2271b1', 'font-weight': 'bold'});
+				$('.actions-tab-content').hide();
+				$('.actions-tab-content[data-tab="' + tab + '"]').show();
 			});
 
 			$(document).on('click', '.edit-payload-btn', function() {
@@ -662,6 +819,84 @@ class Elementor_Retrigger_Tool {
 				}, function(res) {
 					$('#modal_run_btn').text('Run with Changes').prop('disabled', false);
 					modal.hide();
+					if (res.success) alert('Success: ' + res.data.message);
+					else alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
+				});
+			});
+
+			/* ------------------------------------------------------------------ */
+			/*  Edit Actions Modal Logic
+			/* ------------------------------------------------------------------ */
+			$(document).on('click', '.edit-actions-btn', function() {
+				var id = $(this).data('id');
+				$('#actions_modal_sub_id').val(id);
+				$('#actions_modal_loading').show();
+				actionsModal.show();
+
+				// Show first tab by default
+				$('.actions-tab-btn[data-tab="webhook"]').trigger('click');
+
+				$.post(ajaxurl, {
+					action: '<?php echo self::AJAX_GET_ACTIONS; ?>',
+					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
+					id: id
+				}, function(res) {
+					$('#actions_modal_loading').hide();
+					if (res.success) {
+						// Populate form fields with current settings
+						var settings = res.data;
+						$('input[name="webhook_url"]').val(settings.webhook_url || '');
+						$('input[name="email_to"]').val(settings.email_to || '');
+						$('input[name="email_subject"]').val(settings.email_subject || '');
+						$('input[name="email_from"]').val(settings.email_from || '');
+						$('input[name="email_from_name"]').val(settings.email_from_name || '');
+						$('input[name="email_reply_to"]').val(settings.email_reply_to || '');
+						$('input[name="email_to_cc"]').val(settings.email_to_cc || '');
+						$('input[name="email_to_bcc"]').val(settings.email_to_bcc || '');
+						$('input[name="email_to_2"]').val(settings.email_to_2 || '');
+						$('input[name="email_subject_2"]').val(settings.email_subject_2 || '');
+						$('input[name="email_from_2"]').val(settings.email_from_2 || '');
+						$('input[name="email_from_name_2"]').val(settings.email_from_name_2 || '');
+						$('input[name="email_reply_to_2"]').val(settings.email_reply_to_2 || '');
+						$('input[name="email_to_cc_2"]').val(settings.email_to_cc_2 || '');
+						$('input[name="email_to_bcc_2"]').val(settings.email_to_bcc_2 || '');
+						$('input[name="redirect_to"]').val(settings.redirect_to || '');
+					} else {
+						alert('Error loading action settings: ' + (res.data ? res.data.message : 'Unknown error'));
+					}
+				});
+			});
+
+			$('#actions_modal_run_btn').on('click', function() {
+				var id = $('#actions_modal_sub_id').val();
+				var actions = [];
+				$('.action-cb:checked').each(function() {
+					actions.push($(this).val());
+				});
+				if (actions.length === 0) {
+					alert('Please select actions from the main screen first.');
+					return;
+				}
+
+				// Collect custom action settings
+				var customActions = {};
+				$('#actions_modal_form').serializeArray().forEach(function(item) {
+					if (item.value) {
+						customActions[item.name] = item.value;
+					}
+				});
+
+				$(this).text('Processing...').prop('disabled', true);
+
+				$.post(ajaxurl, {
+					action: '<?php echo self::AJAX_ACTION; ?>',
+					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
+					id: id,
+					target_actions: actions,
+					custom_action_settings: customActions
+				}, function(res) {
+					$('#actions_modal_run_btn').text('Run with Custom Actions').prop('disabled', false);
+					actionsModal.hide();
 					if (res.success) alert('Success: ' + res.data.message);
 					else alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
 				});
@@ -784,6 +1019,67 @@ class Elementor_Retrigger_Tool {
 	}
 
 	/* ------------------------------------------------------------------ */
+	/*  AJAX: Get form action settings
+	/* ------------------------------------------------------------------ */
+	public function ajax_get_form_actions() {
+		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
+		$id = absint( $_POST['id'] );
+
+		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
+			wp_send_json_error( [ 'message' => 'Elementor Pro missing' ] );
+		}
+
+		$query      = \ElementorPro\Modules\Forms\Submissions\Database\Query::get_instance();
+		$submission = $query->get_submission( $id );
+
+		if ( ! $submission || empty( $submission['data'] ) ) {
+			wp_send_json_error( [ 'message' => 'Submission not found' ] );
+		}
+
+		$data    = $submission['data'];
+		$post_id = isset( $data['post']['id'] ) ? (int) $data['post']['id'] : 0;
+		$element_id = isset( $data['element_id'] ) ? $data['element_id'] : '';
+
+		if ( ! $post_id || ! $element_id ) {
+			wp_send_json_error( [ 'message' => 'Missing Post/Element ID' ] );
+		}
+
+		$document = \Elementor\Plugin::$instance->documents->get( $post_id );
+		if ( ! $document ) {
+			wp_send_json_error( [ 'message' => 'Original page no longer exists' ] );
+		}
+
+		$elements_data   = $document->get_elements_data();
+		$widget_settings = $this->find_element_settings( $elements_data, $element_id );
+
+		if ( ! $widget_settings ) {
+			wp_send_json_error( [ 'message' => 'Form widget not found' ] );
+		}
+
+		// Return relevant action settings
+		$action_settings = [
+			'webhook_url'         => $widget_settings['webhook_url'] ?? '',
+			'email_to'            => $widget_settings['email_to'] ?? '',
+			'email_subject'       => $widget_settings['email_subject'] ?? '',
+			'email_from'          => $widget_settings['email_from'] ?? '',
+			'email_from_name'     => $widget_settings['email_from_name'] ?? '',
+			'email_reply_to'      => $widget_settings['email_reply_to'] ?? '',
+			'email_to_cc'         => $widget_settings['email_to_cc'] ?? '',
+			'email_to_bcc'        => $widget_settings['email_to_bcc'] ?? '',
+			'email_to_2'          => $widget_settings['email_to_2'] ?? '',
+			'email_subject_2'     => $widget_settings['email_subject_2'] ?? '',
+			'email_from_2'        => $widget_settings['email_from_2'] ?? '',
+			'email_from_name_2'   => $widget_settings['email_from_name_2'] ?? '',
+			'email_reply_to_2'    => $widget_settings['email_reply_to_2'] ?? '',
+			'email_to_cc_2'       => $widget_settings['email_to_cc_2'] ?? '',
+			'email_to_bcc_2'      => $widget_settings['email_to_bcc_2'] ?? '',
+			'redirect_to'         => $widget_settings['redirect_to'] ?? '',
+		];
+
+		wp_send_json_success( $action_settings );
+	}
+
+	/* ------------------------------------------------------------------ */
 	/*  AJAX: Process request
 	/* ------------------------------------------------------------------ */
 	public function ajax_process_request() {
@@ -792,15 +1088,16 @@ class Elementor_Retrigger_Tool {
 			wp_send_json_error( [ 'message' => 'Unauthorized' ] );
 		}
 
-		$id            = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
-		$actions       = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
-		$custom_fields = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
+		$id                    = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
+		$actions               = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
+		$custom_fields         = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
+		$custom_action_settings = isset( $_POST['custom_action_settings'] ) ? (array) $_POST['custom_action_settings'] : null;
 
 		if ( ! $id || empty( $actions ) ) {
 			wp_send_json_error( [ 'message' => 'Invalid Data' ] );
 		}
 
-		$result = $this->execute_retrigger( $id, $actions, $custom_fields );
+		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $custom_action_settings );
 
 		/* Prepare debug info (error or payload) */
 		$debug_info = $this->webhook_debug_info;
@@ -808,11 +1105,16 @@ class Elementor_Retrigger_Tool {
 			$debug_info = "EDITED PAYLOAD:\n" . json_encode( $custom_fields, JSON_PRETTY_PRINT ) . "\n\n" . $debug_info;
 		}
 
+		// Prepare request/response data for logging
+		$request_data  = ! empty( $this->request_data ) ? json_encode( $this->request_data, JSON_PRETTY_PRINT ) : '';
+		$response_data = ! empty( $this->response_data ) ? json_encode( $this->response_data, JSON_PRETTY_PRINT ) : '';
+		$action_settings_log = ! empty( $this->action_settings_used ) ? json_encode( $this->action_settings_used, JSON_PRETTY_PRINT ) : '';
+
 		if ( is_wp_error( $result ) ) {
-			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info );
+			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info, $request_data, $response_data, $action_settings_log );
 			wp_send_json_error( [ 'message' => $result->get_error_message() ] );
 		} else {
-			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info );
+			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info, $request_data, $response_data, $action_settings_log );
 			wp_send_json_success( [ 'message' => implode( ', ', $result ) ] );
 		}
 	}
@@ -820,18 +1122,21 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Logging
 	/* ------------------------------------------------------------------ */
-	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info ) {
+	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info, $request_data = '', $response_data = '', $action_settings_used = '' ) {
 		global $wpdb;
 		$table = $wpdb->prefix . self::LOG_TABLE;
 		$wpdb->insert(
 			$table,
 			[
-				'submission_id' => $submission_id,
-				'actions'       => $actions,
-				'status'        => $status,
-				'message'       => $message,
-				'full_debug'    => $debug_info,
-				'created_at'    => current_time( 'mysql' ),
+				'submission_id'        => $submission_id,
+				'actions'              => $actions,
+				'status'               => $status,
+				'message'              => $message,
+				'full_debug'           => $debug_info,
+				'request_data'         => $request_data,
+				'response_data'        => $response_data,
+				'action_settings_used' => $action_settings_used,
+				'created_at'           => current_time( 'mysql' ),
 			]
 		);
 	}
@@ -839,7 +1144,7 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Execute retrigger
 	/* ------------------------------------------------------------------ */
-	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null ) {
+	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $custom_action_settings = null ) {
 		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
 			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
 		}
@@ -892,6 +1197,17 @@ class Elementor_Retrigger_Tool {
 
 		$this->sanitize_settings( $widget_settings, $element_id );
 
+		// Apply custom action settings if provided
+		if ( is_array( $custom_action_settings ) ) {
+			foreach ( $custom_action_settings as $key => $value ) {
+				if ( ! empty( $value ) ) {
+					$widget_settings[ $key ] = $value;
+				}
+			}
+			// Store for logging
+			$this->action_settings_used = $custom_action_settings;
+		}
+
 		$mock_record = $this->create_mock_record( $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data );
 		$mock_ajax   = new class {
 			public $data = [];
@@ -907,7 +1223,11 @@ class Elementor_Retrigger_Tool {
 
 		$executed          = [];
 		$actions_registry  = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' )->get_form_actions();
+
+		// Hook into webhooks to capture request/response
 		add_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ], 10, 2 );
+		add_filter( 'http_request_args', [ $this, 'capture_request_data' ], 10, 2 );
+		add_action( 'http_api_debug', [ $this, 'capture_response_data' ], 10, 5 );
 
 		foreach ( $target_actions as $action_slug ) {
 			$enabled_actions = $widget_settings['submit_actions'] ?? [];
@@ -921,6 +1241,27 @@ class Elementor_Retrigger_Tool {
 						continue;
 					}
 					$this->webhook_debug_info = '';
+
+					// Reset request/response data for each action
+					$this->request_data = [];
+					$this->response_data = [];
+
+					// Store the payload being sent
+					if ( 'webhook' === $action_slug && ! empty( $widget_settings['webhook_url'] ) ) {
+						$this->request_data['webhook_url'] = $widget_settings['webhook_url'];
+						$this->request_data['form_data'] = $formatted_fields;
+					}
+					if ( 'email' === $action_slug ) {
+						$this->request_data['email_to'] = $widget_settings['email_to'] ?? '';
+						$this->request_data['email_subject'] = $widget_settings['email_subject'] ?? '';
+						$this->request_data['form_data'] = $formatted_fields;
+					}
+					if ( 'email2' === $action_slug ) {
+						$this->request_data['email_to_2'] = $widget_settings['email_to_2'] ?? '';
+						$this->request_data['email_subject_2'] = $widget_settings['email_subject_2'] ?? '';
+						$this->request_data['form_data'] = $formatted_fields;
+					}
+
 					$action_instance->run( $mock_record, $mock_ajax );
 					$query->add_action_log( $submission_id, $action_instance, 'success', 'Manual Re‑trigger via Tool' );
 					$executed[] = $action_slug;
@@ -930,11 +1271,19 @@ class Elementor_Retrigger_Tool {
 					if ( empty( $this->webhook_debug_info ) ) {
 						$this->webhook_debug_info = $e->getMessage();
 					}
+					// Cleanup hooks before returning
+					remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
+					remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
+					remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
 					return new WP_Error( 'action_fail', "$action_slug failed: $error_msg" );
 				}
 			}
 		}
+
+		// Cleanup hooks
 		remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
+		remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
+		remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
 
 		if ( empty( $executed ) ) {
 			return new WP_Error( 'no_run', 'No matching enabled actions found.' );
@@ -954,6 +1303,41 @@ class Elementor_Retrigger_Tool {
 				$msg  = wp_remote_retrieve_response_message( $response );
 				$body = wp_remote_retrieve_body( $response );
 				$this->webhook_debug_info = "HTTP $code ($msg). Response: $body";
+			}
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Capture request data
+	/* ------------------------------------------------------------------ */
+	public function capture_request_data( $args, $url ) {
+		// Only capture requests that are likely from form actions
+		if ( strpos( $url, site_url() ) === false ) {
+			// External request - likely a webhook
+			$this->request_data['url'] = $url;
+			$this->request_data['method'] = $args['method'] ?? 'POST';
+			$this->request_data['headers'] = $args['headers'] ?? [];
+			$this->request_data['body'] = $args['body'] ?? '';
+			$this->request_data['timeout'] = $args['timeout'] ?? '';
+		}
+		return $args;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Capture response data
+	/* ------------------------------------------------------------------ */
+	public function capture_response_data( $response, $context, $class, $args, $url ) {
+		// Only capture responses from external URLs (webhooks)
+		if ( strpos( $url, site_url() ) === false && 'response' === $context ) {
+			if ( is_wp_error( $response ) ) {
+				$this->response_data['error'] = $response->get_error_message();
+				$this->response_data['error_code'] = $response->get_error_code();
+			} else {
+				$this->response_data['status_code'] = wp_remote_retrieve_response_code( $response );
+				$this->response_data['status_message'] = wp_remote_retrieve_response_message( $response );
+				$this->response_data['headers'] = wp_remote_retrieve_headers( $response )->getAll();
+				$this->response_data['body'] = wp_remote_retrieve_body( $response );
+				$this->response_data['body_length'] = strlen( $this->response_data['body'] );
 			}
 		}
 	}
@@ -1160,4 +1544,6 @@ class Elementor_Retrigger_Tool {
 }
 
 new Elementor_Retrigger_Tool();
+
+endif;
 
