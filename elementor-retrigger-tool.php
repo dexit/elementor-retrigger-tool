@@ -3,7 +3,7 @@
  * Plugin Name: Elementor Submission Re‑Trigger Tool
  * Plugin URI:  https://example.com/elementor-retrigger-tool
  * Description: Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
- * Version:     11.0.0
+ * Version:     10.0.0
  * Author:      Custom Extension
  * Author URI:  https://example.com
  * Text Domain: elementor-retrigger-tool
@@ -24,23 +24,19 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Constants
 	/* ------------------------------------------------------------------ */
-	const PAGE_SLUG             = 'e-retrigger-tool';
-	const AJAX_ACTION           = 'e_retrigger_process';
-	const AJAX_GET_DATA         = 'e_retrigger_get_data';
-	const AJAX_GET_ACTIONS      = 'e_retrigger_get_actions';
-	const LOG_TABLE             = 'e_retrigger_logs';
-	const OPTION_RETENTION      = 'e_retrigger_retention_days';
-	const CRON_HOOK             = 'e_retrigger_daily_cleanup_event';
-	const PER_PAGE              = 20;
+	const PAGE_SLUG          = 'e-retrigger-tool';
+	const AJAX_ACTION        = 'e_retrigger_process';
+	const AJAX_GET_DATA      = 'e_retrigger_get_data';
+	const LOG_TABLE          = 'e_retrigger_logs';
+	const OPTION_RETENTION   = 'e_retrigger_retention_days';
+	const CRON_HOOK          = 'e_retrigger_daily_cleanup_event';
+	const PER_PAGE           = 20;
 
 	/* ------------------------------------------------------------------ */
 	/*  Properties
 	/* ------------------------------------------------------------------ */
 	private $webhook_debug_info = '';
 	private $execution_log_buffer = '';
-	private $request_data = [];
-	private $response_data = [];
-	private $action_settings_used = [];
 
 	/* ------------------------------------------------------------------ */
 	/*  Constructor
@@ -53,7 +49,6 @@ class Elementor_Retrigger_Tool {
 		/* AJAX */
 		add_action( 'wp_ajax_' . self::AJAX_ACTION, [ $this, 'ajax_process_request' ] );
 		add_action( 'wp_ajax_' . self::AJAX_GET_DATA, [ $this, 'ajax_get_submission_data' ] );
-		add_action( 'wp_ajax_' . self::AJAX_GET_ACTIONS, [ $this, 'ajax_get_form_actions' ] );
 
 		/* Cron & Activation */
 		add_action( self::CRON_HOOK, [ $this, 'scheduled_log_cleanup' ] );
@@ -88,7 +83,7 @@ class Elementor_Retrigger_Tool {
 	/*  Database
 	/* ------------------------------------------------------------------ */
 	public function check_db_install() {
-		if ( get_option( 'e_retrigger_db_ver' ) === '2.0' ) {
+		if ( get_option( 'e_retrigger_db_ver' ) === '1.0' ) {
 			return;
 		}
 
@@ -103,9 +98,6 @@ class Elementor_Retrigger_Tool {
 			status varchar(20) NOT NULL,
 			message text NOT NULL,
 			full_debug text,
-			request_data longtext,
-			response_data longtext,
-			action_settings_used longtext,
 			created_at datetime DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY submission_id (submission_id),
@@ -115,7 +107,7 @@ class Elementor_Retrigger_Tool {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 
-		update_option( 'e_retrigger_db_ver', '2.0' );
+		update_option( 'e_retrigger_db_ver', '1.0' );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -264,94 +256,195 @@ class Elementor_Retrigger_Tool {
 		global $wpdb;
 		$table = $wpdb->prefix . self::LOG_TABLE;
 
-		$paged   = isset( $_GET['paged'] ) ? max( 1, absint( $_GET['paged'] ) ) : 1;
-		$orderby = isset( $_GET['orderby'] ) ? sanitize_text_field( $_GET['orderby'] ) : 'created_at';
-		$order   = isset( $_GET['order'] ) ? sanitize_text_field( $_GET['order'] ) : 'DESC';
-		$offset  = ( $paged - 1 ) * self::PER_PAGE;
-
-		$total_items = $wpdb->get_var( "SELECT COUNT(*) FROM $table" );
-		$total_pages = ceil( $total_items / self::PER_PAGE );
-
-		$logs = $wpdb->get_results(
-			$wpdb->prepare(
-				"SELECT * FROM $table ORDER BY $orderby $order LIMIT %d OFFSET %d",
-				self::PER_PAGE,
-				$offset
-			)
-		);
-
-		$base_url = admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=logs' );
-		$sort_link = function ( $col ) use ( $base_url, $orderby, $order ) {
-			$new_order = ( $orderby === $col && $order === 'DESC' ) ? 'ASC' : 'DESC';
-			return esc_url( add_query_arg( [ 'orderby' => $col, 'order' => $new_order ], $base_url ) );
-		};
-
-		echo '<div class="card" style="padding:0; max-width: 100%;">';
-		echo '<table class="wp-list-table widefat fixed striped">';
-		echo '<thead><tr>
-			<th width="160"><a href="' . $sort_link( 'created_at' ) . '">Date</a></th>
-			<th width="100"><a href="' . $sort_link( 'submission_id' ) . '">Sub ID</a></th>
-			<th width="150">Actions</th>
-			<th width="100"><a href="' . $sort_link( 'status' ) . '">Status</a></th>
-			<th>Message / Debug Info</th>
-		</tr></thead><tbody>';
-
-		if ( empty( $logs ) ) {
-			echo '<tr><td colspan="5">No logs found.</td></tr>';
-		} else {
-			foreach ( $logs as $log ) {
-				$color        = $log->status === 'success' ? '#46b450' : '#dc3232';
-				$status_badge = sprintf(
-					'<span style="color:#fff; background:%s; padding: 3px 8px; border-radius: 3px; font-size: 10px; text-transform: uppercase;">%s</span>',
-					$color,
-					$log->status
-				);
-				$sub_link = admin_url( 'admin.php?page=e-form-submissions&action=view&id=' . $log->submission_id );
-				echo '<tr>
-					<td>' . esc_html( $log->created_at ) . '</td>
-					<td><a href="' . esc_url( $sub_link ) . '" target="_blank">#' . esc_html( $log->submission_id ) . ' <span class="dashicons dashicons-external"></span></a></td>
-					<td>' . esc_html( $log->actions ) . '</td>
-					<td>' . $status_badge . '</td>
-					<td><strong>' . esc_html( $log->message ) . '</strong>';
-
-				// Extended Debug Info
-				if ( ! empty( $log->full_debug ) ) {
-					echo '<details style="margin-top:5px;"><summary style="color:#2271b1; cursor:pointer; font-size:11px;">View Extended Info</summary><pre style="background:#f0f0f1; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->full_debug ) . '</pre></details>';
-				}
-
-				// Request Data (Raw)
-				if ( ! empty( $log->request_data ) ) {
-					echo '<details style="margin-top:5px;"><summary style="color:#0073aa; cursor:pointer; font-size:11px;">📤 View Request Data (Raw)</summary><pre style="background:#e8f5fa; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->request_data ) . '</pre></details>';
-				}
-
-				// Response Data (Raw)
-				if ( ! empty( $log->response_data ) ) {
-					echo '<details style="margin-top:5px;"><summary style="color:#0a7a0a; cursor:pointer; font-size:11px;">📥 View Response Data (Raw)</summary><pre style="background:#e8fae8; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->response_data ) . '</pre></details>';
-				}
-
-				// Action Settings Used
-				if ( ! empty( $log->action_settings_used ) ) {
-					echo '<details style="margin-top:5px;"><summary style="color:#7c3aaa; cursor:pointer; font-size:11px;">⚙️ View Action Settings Used</summary><pre style="background:#f3e8fa; padding:10px; overflow-x:auto; font-size:10px;">' . esc_html( $log->action_settings_used ) . '</pre></details>';
-				}
-
-				echo '</td></tr>';
+		/* Handle bulk delete action */
+		if ( isset( $_POST['action'] ) && $_POST['action'] === 'delete' && isset( $_POST['log_ids'] ) && check_admin_referer( 'bulk-logs' ) ) {
+			$log_ids = array_map( 'absint', $_POST['log_ids'] );
+			if ( ! empty( $log_ids ) ) {
+				$placeholders = implode( ',', array_fill( 0, count( $log_ids ), '%d' ) );
+				$wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE id IN ($placeholders)", $log_ids ) );
+				echo '<div class="notice notice-success is-dismissible"><p>Deleted ' . count( $log_ids ) . ' log(s).</p></div>';
 			}
 		}
-		echo '</tbody></table>';
 
-		if ( $total_pages > 1 ) {
-			echo '<div class="tablenav bottom"><div class="tablenav-pages">';
-			echo paginate_links(
-				[
-					'base'     => add_query_arg( 'paged', '%#%' ),
-					'format'   => '',
-					'total'    => $total_pages,
-					'current'  => $paged,
-				]
-			);
-			echo '</div></div>';
+		$paged        = isset( $_GET['paged'] ) ? max( 1, absint( $_GET['paged'] ) ) : 1;
+		$orderby      = isset( $_GET['orderby'] ) ? sanitize_text_field( $_GET['orderby'] ) : 'created_at';
+		$order        = isset( $_GET['order'] ) ? sanitize_text_field( $_GET['order'] ) : 'DESC';
+		$search       = isset( $_GET['s'] ) ? sanitize_text_field( $_GET['s'] ) : '';
+		$filter_status = isset( $_GET['filter_status'] ) ? sanitize_text_field( $_GET['filter_status'] ) : '';
+		$offset       = ( $paged - 1 ) * self::PER_PAGE;
+
+		/* Build WHERE clause for search and filters */
+		$where = [];
+		$params = [];
+		if ( ! empty( $search ) ) {
+			$where[] = "(submission_id LIKE %s OR message LIKE %s OR actions LIKE %s)";
+			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
+			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
+			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
 		}
-		echo '</div>';
+		if ( ! empty( $filter_status ) ) {
+			$where[] = "status = %s";
+			$params[] = $filter_status;
+		}
+		$where_sql = ! empty( $where ) ? ' WHERE ' . implode( ' AND ', $where ) : '';
+
+		$total_items = $wpdb->get_var(
+			empty( $params ) ? "SELECT COUNT(*) FROM $table $where_sql" : $wpdb->prepare( "SELECT COUNT(*) FROM $table $where_sql", $params )
+		);
+		$total_pages = ceil( $total_items / self::PER_PAGE );
+
+		$sql = "SELECT * FROM $table $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
+		$params[] = self::PER_PAGE;
+		$params[] = $offset;
+		$logs = $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
+
+		$base_url = admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=logs' );
+		$sort_link = function ( $col ) use ( $base_url, $orderby, $order, $search, $filter_status ) {
+			$new_order = ( $orderby === $col && $order === 'DESC' ) ? 'ASC' : 'DESC';
+			return esc_url( add_query_arg( [ 'orderby' => $col, 'order' => $new_order, 's' => $search, 'filter_status' => $filter_status ], $base_url ) );
+		};
+		?>
+
+		<!-- Modal for viewing debug info -->
+		<div id="log_debug_modal" class="e-retrigger-modal" style="display:none;">
+			<div class="e-retrigger-modal-content" style="max-width:900px;">
+				<span class="e-retrigger-close">&times;</span>
+				<h2>Log Details</h2>
+				<div id="log_debug_content" style="background:#f0f0f1; padding:15px; max-height:500px; overflow:auto;">
+					<pre style="white-space:pre-wrap; font-size:12px; margin:0;"></pre>
+				</div>
+			</div>
+		</div>
+
+		<div class="card" style="padding:15px; max-width: 100%;">
+			<!-- Search and Filter Form -->
+			<form method="get" style="margin-bottom:15px;">
+				<input type="hidden" name="page" value="<?php echo self::PAGE_SLUG; ?>">
+				<input type="hidden" name="tab" value="logs">
+				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+					<input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search logs..." style="flex:1; min-width:200px;">
+					<select name="filter_status" style="width:150px;">
+						<option value="">All Statuses</option>
+						<option value="success" <?php selected( $filter_status, 'success' ); ?>>Success</option>
+						<option value="failed" <?php selected( $filter_status, 'failed' ); ?>>Failed</option>
+					</select>
+					<button type="submit" class="button">Filter</button>
+					<a href="<?php echo esc_url( $base_url ); ?>" class="button">Reset</a>
+				</div>
+			</form>
+
+			<!-- Bulk Actions Form -->
+			<form method="post" id="logs-filter">
+				<?php wp_nonce_field( 'bulk-logs' ); ?>
+				<div class="tablenav top" style="margin-bottom:10px;">
+					<div class="alignleft actions bulkactions">
+						<select name="action">
+							<option value="-1">Bulk Actions</option>
+							<option value="delete">Delete</option>
+						</select>
+						<button type="submit" class="button action">Apply</button>
+					</div>
+					<div class="tablenav-pages" style="float:right;">
+						<span class="displaying-num"><?php echo $total_items; ?> items</span>
+					</div>
+				</div>
+
+				<table class="wp-list-table widefat fixed striped">
+					<thead>
+						<tr>
+							<td class="manage-column column-cb check-column"><input type="checkbox" id="cb-select-all-logs"></td>
+							<th width="160"><a href="<?php echo $sort_link( 'created_at' ); ?>">Date</a></th>
+							<th width="100"><a href="<?php echo $sort_link( 'submission_id' ); ?>">Sub ID</a></th>
+							<th width="150">Actions</th>
+							<th width="100"><a href="<?php echo $sort_link( 'status' ); ?>">Status</a></th>
+							<th>Message</th>
+							<th width="80">Details</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php if ( empty( $logs ) ) : ?>
+							<tr><td colspan="7">No logs found.</td></tr>
+						<?php else : ?>
+							<?php foreach ( $logs as $log ) : ?>
+								<?php
+								$color = $log->status === 'success' ? '#46b450' : '#dc3232';
+								$status_badge = sprintf(
+									'<span style="color:#fff; background:%s; padding: 3px 8px; border-radius: 3px; font-size: 10px; text-transform: uppercase;">%s</span>',
+									$color,
+									$log->status
+								);
+								$sub_link = admin_url( 'admin.php?page=e-form-submissions&action=view&id=' . $log->submission_id );
+								?>
+								<tr>
+									<th scope="row" class="check-column">
+										<input type="checkbox" name="log_ids[]" value="<?php echo esc_attr( $log->id ); ?>" class="log-checkbox">
+									</th>
+									<td><?php echo esc_html( $log->created_at ); ?></td>
+									<td><a href="<?php echo esc_url( $sub_link ); ?>" target="_blank">#<?php echo esc_html( $log->submission_id ); ?> <span class="dashicons dashicons-external"></span></a></td>
+									<td><?php echo esc_html( $log->actions ); ?></td>
+									<td><?php echo $status_badge; ?></td>
+									<td><strong><?php echo esc_html( $log->message ); ?></strong></td>
+									<td>
+										<?php if ( ! empty( $log->full_debug ) ) : ?>
+											<button type="button" class="button button-small view-log-details" data-log-id="<?php echo esc_attr( $log->id ); ?>" data-debug="<?php echo esc_attr( $log->full_debug ); ?>">
+												<span class="dashicons dashicons-visibility" style="line-height:1.3;"></span> View
+											</button>
+										<?php else : ?>
+											<span style="color:#999;">—</span>
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						<?php endif; ?>
+					</tbody>
+				</table>
+
+				<?php if ( $total_pages > 1 ) : ?>
+					<div class="tablenav bottom">
+						<div class="tablenav-pages">
+							<?php
+							echo paginate_links(
+								[
+									'base'     => add_query_arg( [ 'paged' => '%#%', 's' => $search, 'filter_status' => $filter_status ] ),
+									'format'   => '',
+									'total'    => $total_pages,
+									'current'  => $paged,
+								]
+							);
+							?>
+						</div>
+					</div>
+				<?php endif; ?>
+			</form>
+		</div>
+
+		<script type="text/javascript">
+		jQuery(document).ready(function($) {
+			/* Select all checkbox */
+			$('#cb-select-all-logs').on('click', function() {
+				$('.log-checkbox').prop('checked', this.checked);
+			});
+
+			/* View log details in modal */
+			var logModal = $('#log_debug_modal');
+			$('.view-log-details').on('click', function() {
+				var debug = $(this).data('debug');
+				$('#log_debug_content pre').text(debug);
+				logModal.show();
+			});
+
+			$('.e-retrigger-close').on('click', function() {
+				logModal.hide();
+			});
+
+			$(window).on('click', function(e) {
+				if ($(e.target).is(logModal)) {
+					logModal.hide();
+				}
+			});
+		});
+		</script>
+		<?php
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -370,20 +463,7 @@ class Elementor_Retrigger_Tool {
 		$total_items      = $submissions_data['total'];
 		$total_pages      = ceil( $total_items / self::PER_PAGE );
 		$unique_forms     = $this->get_unique_forms();
-
-		/* Available actions from Elementor Pro */
-		$available_actions = [];
-		if ( class_exists( '\ElementorPro\Plugin' ) ) {
-			$modules = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' );
-			if ( $modules ) {
-				foreach ( $modules->get_form_actions() as $slug => $instance ) {
-					if ( in_array( $slug, [ 'save-to-database', 'redirect' ], true ) ) {
-						continue;
-					}
-					$available_actions[ $slug ] = $instance->get_label();
-				}
-			}
-		}
+		$available_actions = $this->get_available_actions();
 
 		$base_url = add_query_arg(
 			[
@@ -485,12 +565,9 @@ class Elementor_Retrigger_Tool {
 											<td><?php echo esc_html( $sub->form_name ); ?></td>
 											<td><?php echo esc_html( $sub->email ?: '-' ); ?></td>
 											<td><?php echo esc_html( date( 'Y-m-d H:i', strtotime( $sub->created_at ) ) ); ?></td>
-											<td style="display:flex; gap:3px;">
+											<td>
 												<button type="button" class="button button-small edit-payload-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="Edit Payload & Run">
 													<span class="dashicons dashicons-edit" style="line-height:1.3;"></span>
-												</button>
-												<button type="button" class="button button-small edit-actions-btn" data-id="<?php echo esc_attr( $sub->id ); ?>" title="Edit Form Actions">
-													<span class="dashicons dashicons-admin-settings" style="line-height:1.3;"></span>
 												</button>
 											</td>
 										</tr>
@@ -568,123 +645,34 @@ class Elementor_Retrigger_Tool {
 
 		<!-- Modal for editing payload -->
 		<div id="edit_payload_modal" class="e-retrigger-modal">
-			<div class="e-retrigger-modal-content">
+			<div class="e-retrigger-modal-content" style="max-width:800px;">
 				<span class="e-retrigger-close">&times;</span>
 				<h2>Edit Submission Payload</h2>
-				<p>Modify the data below and run actions immediately.</p>
+				<p>Modify the data below and select actions to run.</p>
 				<div id="modal_loading" style="display:none;">Loading data...</div>
 				<form id="modal_form">
 					<input type="hidden" id="modal_sub_id">
-					<div id="modal_fields_container" style="max-height:300px; overflow-y:auto; margin-bottom:15px;"></div>
+
+					<!-- Fields Section -->
+					<div style="margin-bottom:20px;">
+						<h3 style="margin-bottom:10px;">Form Fields</h3>
+						<div id="modal_fields_container" style="max-height:250px; overflow-y:auto; border:1px solid #ddd; padding:10px; background:#fafafa;"></div>
+						<button type="button" id="add_custom_field_btn" class="button" style="margin-top:10px;">+ Add Custom Field</button>
+					</div>
+
+					<!-- Actions Section -->
+					<div style="margin-bottom:20px;">
+						<h3 style="margin-bottom:10px;">Actions to Execute</h3>
+						<div id="modal_actions_container" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px; border:1px solid #ddd; background:#fafafa;"></div>
+					</div>
+
+					<!-- Webhook URL Section -->
+					<div id="modal_webhook_container" style="margin-bottom:20px; display:none;">
+						<h3 style="margin-bottom:10px;">Webhook URL</h3>
+						<input type="text" id="modal_webhook_url" name="webhook_url" style="width:100%;" placeholder="https://example.com/webhook">
+					</div>
+
 					<button type="button" id="modal_run_btn" class="button button-primary button-large">Run with Changes</button>
-				</form>
-			</div>
-		</div>
-
-		<!-- Modal for editing form actions -->
-		<div id="edit_actions_modal" class="e-retrigger-modal">
-			<div class="e-retrigger-modal-content" style="width:700px; max-width:90%;">
-				<span class="e-retrigger-close-actions">&times;</span>
-				<h2>Edit Form Action Settings</h2>
-				<p>Modify the action settings below and run with custom configuration.</p>
-				<div id="actions_modal_loading" style="display:none;">Loading data...</div>
-				<form id="actions_modal_form">
-					<input type="hidden" id="actions_modal_sub_id">
-					<div id="actions_tabs" style="margin-bottom:15px; border-bottom:1px solid #ddd;">
-						<button type="button" class="actions-tab-btn" data-tab="webhook" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Webhook</button>
-						<button type="button" class="actions-tab-btn" data-tab="email" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Email</button>
-						<button type="button" class="actions-tab-btn" data-tab="email2" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Email 2</button>
-						<button type="button" class="actions-tab-btn" data-tab="redirect" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Redirect</button>
-						<button type="button" class="actions-tab-btn" data-tab="other" style="padding:8px 15px; border:none; background:transparent; cursor:pointer; border-bottom:2px solid transparent;">Other Actions</button>
-					</div>
-					<div id="actions_modal_content" style="max-height:400px; overflow-y:auto; margin-bottom:15px;">
-						<!-- Webhook Tab -->
-						<div class="actions-tab-content" data-tab="webhook" style="display:none;">
-							<div class="e-retrigger-field-row">
-								<label>Webhook URL</label>
-								<input type="text" name="webhook_url" placeholder="https://example.com/webhook">
-							</div>
-						</div>
-
-						<!-- Email Tab -->
-						<div class="actions-tab-content" data-tab="email" style="display:none;">
-							<div class="e-retrigger-field-row">
-								<label>Email To</label>
-								<input type="text" name="email_to" placeholder="admin@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email Subject</label>
-								<input type="text" name="email_subject" placeholder="New Form Submission">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email From</label>
-								<input type="text" name="email_from" placeholder="noreply@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email From Name</label>
-								<input type="text" name="email_from_name" placeholder="Website Name">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Reply To</label>
-								<input type="text" name="email_reply_to" placeholder="support@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>CC</label>
-								<input type="text" name="email_to_cc" placeholder="cc@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>BCC</label>
-								<input type="text" name="email_to_bcc" placeholder="bcc@example.com">
-							</div>
-						</div>
-
-						<!-- Email 2 Tab -->
-						<div class="actions-tab-content" data-tab="email2" style="display:none;">
-							<div class="e-retrigger-field-row">
-								<label>Email To (2)</label>
-								<input type="text" name="email_to_2" placeholder="admin2@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email Subject (2)</label>
-								<input type="text" name="email_subject_2" placeholder="New Form Submission">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email From (2)</label>
-								<input type="text" name="email_from_2" placeholder="noreply@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Email From Name (2)</label>
-								<input type="text" name="email_from_name_2" placeholder="Website Name">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>Reply To (2)</label>
-								<input type="text" name="email_reply_to_2" placeholder="support@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>CC (2)</label>
-								<input type="text" name="email_to_cc_2" placeholder="cc@example.com">
-							</div>
-							<div class="e-retrigger-field-row">
-								<label>BCC (2)</label>
-								<input type="text" name="email_to_bcc_2" placeholder="bcc@example.com">
-							</div>
-						</div>
-
-						<!-- Redirect Tab -->
-						<div class="actions-tab-content" data-tab="redirect" style="display:none;">
-							<div class="e-retrigger-field-row">
-								<label>Redirect URL</label>
-								<input type="text" name="redirect_to" placeholder="https://example.com/thank-you">
-							</div>
-						</div>
-
-						<!-- Other Actions Tab -->
-						<div class="actions-tab-content" data-tab="other" style="display:none;">
-							<p style="color:#666;">Additional action-specific settings can be configured here.</p>
-							<div id="other_actions_container"></div>
-						</div>
-					</div>
-					<button type="button" id="actions_modal_run_btn" class="button button-primary button-large">Run with Custom Actions</button>
 				</form>
 			</div>
 		</div>
@@ -736,9 +724,11 @@ class Elementor_Retrigger_Tool {
 			});
 
 			/* ------------------------------------------------------------------ */
-			/*  Modal logic (Payload Editor)
+			/*  Modal logic
 			/* ------------------------------------------------------------------ */
 			var modal = $('#edit_payload_modal');
+			var availableActions = <?php echo json_encode( $this->get_available_actions() ); ?>;
+
 			$('.e-retrigger-close').on('click', function() {
 				modal.hide();
 			});
@@ -746,30 +736,28 @@ class Elementor_Retrigger_Tool {
 				if ($(e.target).is(modal)) modal.hide();
 			});
 
-			/* ------------------------------------------------------------------ */
-			/*  Modal logic (Actions Editor)
-			/* ------------------------------------------------------------------ */
-			var actionsModal = $('#edit_actions_modal');
-			$('.e-retrigger-close-actions').on('click', function() {
-				actionsModal.hide();
-			});
-			$(window).on('click', function(e) {
-				if ($(e.target).is(actionsModal)) actionsModal.hide();
-			});
-
-			// Tab switching
-			$('.actions-tab-btn').on('click', function() {
-				var tab = $(this).data('tab');
-				$('.actions-tab-btn').css({'border-bottom-color': 'transparent', 'font-weight': 'normal'});
-				$(this).css({'border-bottom-color': '#2271b1', 'font-weight': 'bold'});
-				$('.actions-tab-content').hide();
-				$('.actions-tab-content[data-tab="' + tab + '"]').show();
+			/* Add custom field button */
+			$('#add_custom_field_btn').on('click', function() {
+				var timestamp = Date.now();
+				var html = '<div class="e-retrigger-field-row" data-custom="true">' +
+					'<label><input type="text" placeholder="Field Key" class="field-key-input" style="width:150px;"></label>' +
+					'<input type="text" placeholder="Field Value" class="field-value-input" style="flex:1;">' +
+					'<button type="button" class="button remove-field-btn" style="margin-left:5px;">Remove</button>' +
+					'</div>';
+				$('#modal_fields_container').append(html);
 			});
 
+			/* Remove custom field */
+			$(document).on('click', '.remove-field-btn', function() {
+				$(this).closest('.e-retrigger-field-row').remove();
+			});
+
+			/* Open modal and load data */
 			$(document).on('click', '.edit-payload-btn', function() {
 				var id = $(this).data('id');
 				$('#modal_sub_id').val(id);
 				$('#modal_fields_container').html('');
+				$('#modal_actions_container').html('');
 				$('#modal_loading').show();
 				modal.show();
 
@@ -780,33 +768,88 @@ class Elementor_Retrigger_Tool {
 				}, function(res) {
 					$('#modal_loading').hide();
 					if (res.success) {
+						/* Populate fields */
+						var fields = res.data.fields || res.data;
 						var html = '';
-						$.each(res.data, function(key, val) {
-							html += '<div class="e-retrigger-field-row"><label>' + key + '</label><input type="text" name="custom_fields[' + key + ']" value="' + val + '"></div>';
+						$.each(fields, function(key, val) {
+							html += '<div class="e-retrigger-field-row">' +
+								'<label>' + key + '</label>' +
+								'<input type="text" name="custom_fields[' + key + ']" value="' + val + '" data-original-key="' + key + '">' +
+								'</div>';
 						});
 						$('#modal_fields_container').html(html);
+
+						/* Populate actions */
+						var formActions = res.data.actions || [];
+						var executedActions = res.data.executed_actions || formActions;
+						var actionsHtml = '';
+
+						$.each(availableActions, function(slug, label) {
+							var isEnabled = formActions.indexOf(slug) !== -1;
+							var wasExecuted = executedActions.indexOf(slug) !== -1;
+							var checked = wasExecuted ? 'checked' : '';
+							var disabled = !isEnabled ? 'disabled' : '';
+							var style = !isEnabled ? 'opacity:0.5;' : '';
+
+							actionsHtml += '<label style="' + style + '">' +
+								'<input type="checkbox" class="modal-action-cb" value="' + slug + '" ' + checked + ' ' + disabled + '> ' +
+								label + (wasExecuted ? ' ✓' : '') +
+								'</label>';
+						});
+						$('#modal_actions_container').html(actionsHtml);
+
+						/* Show/populate webhook URL if webhook action is enabled */
+						var webhookUrl = res.data.webhook_url || '';
+						if (formActions.indexOf('webhook') !== -1 || formActions.indexOf('webhooks') !== -1) {
+							$('#modal_webhook_url').val(webhookUrl);
+							$('#modal_webhook_container').show();
+						} else {
+							$('#modal_webhook_container').hide();
+						}
 					} else {
 						$('#modal_fields_container').html('<p style="color:red;">Error: ' + res.data.message + '</p>');
 					}
 				});
 			});
 
+			/* Run with changes */
 			$('#modal_run_btn').on('click', function() {
 				var id = $('#modal_sub_id').val();
 				var customData = {};
-				$('#modal_form').serializeArray().forEach(function(item) {
-					var match = item.name.match(/custom_fields\[(.*?)\]/);
-					if (match) customData[match[1]] = item.value;
+
+				/* Get all field values including custom ones */
+				$('#modal_fields_container .e-retrigger-field-row').each(function() {
+					var row = $(this);
+					if (row.data('custom')) {
+						/* Custom field - get key from input */
+						var key = row.find('.field-key-input').val().trim();
+						var val = row.find('.field-value-input').val();
+						if (key) {
+							customData[key] = val;
+						}
+					} else {
+						/* Original field - get from named input */
+						var input = row.find('input[name^="custom_fields"]');
+						var match = input.attr('name').match(/custom_fields\[(.*?)\]/);
+						if (match) {
+							customData[match[1]] = input.val();
+						}
+					}
 				});
 
+				/* Get selected actions from modal */
 				var actions = [];
-				$('.action-cb:checked').each(function() {
+				$('.modal-action-cb:checked').each(function() {
 					actions.push($(this).val());
 				});
+
 				if (actions.length === 0) {
-					alert('Please select actions from the main screen first.');
+					alert('Please select at least one action to execute.');
 					return;
 				}
+
+				/* Get webhook URL if applicable */
+				var webhookUrl = $('#modal_webhook_url').val();
 
 				$(this).text('Processing...').prop('disabled', true);
 
@@ -815,88 +858,11 @@ class Elementor_Retrigger_Tool {
 					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
 					id: id,
 					target_actions: actions,
-					custom_fields: customData
+					custom_fields: customData,
+					webhook_url: webhookUrl
 				}, function(res) {
 					$('#modal_run_btn').text('Run with Changes').prop('disabled', false);
 					modal.hide();
-					if (res.success) alert('Success: ' + res.data.message);
-					else alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
-				});
-			});
-
-			/* ------------------------------------------------------------------ */
-			/*  Edit Actions Modal Logic
-			/* ------------------------------------------------------------------ */
-			$(document).on('click', '.edit-actions-btn', function() {
-				var id = $(this).data('id');
-				$('#actions_modal_sub_id').val(id);
-				$('#actions_modal_loading').show();
-				actionsModal.show();
-
-				// Show first tab by default
-				$('.actions-tab-btn[data-tab="webhook"]').trigger('click');
-
-				$.post(ajaxurl, {
-					action: '<?php echo self::AJAX_GET_ACTIONS; ?>',
-					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
-					id: id
-				}, function(res) {
-					$('#actions_modal_loading').hide();
-					if (res.success) {
-						// Populate form fields with current settings
-						var settings = res.data;
-						$('input[name="webhook_url"]').val(settings.webhook_url || '');
-						$('input[name="email_to"]').val(settings.email_to || '');
-						$('input[name="email_subject"]').val(settings.email_subject || '');
-						$('input[name="email_from"]').val(settings.email_from || '');
-						$('input[name="email_from_name"]').val(settings.email_from_name || '');
-						$('input[name="email_reply_to"]').val(settings.email_reply_to || '');
-						$('input[name="email_to_cc"]').val(settings.email_to_cc || '');
-						$('input[name="email_to_bcc"]').val(settings.email_to_bcc || '');
-						$('input[name="email_to_2"]').val(settings.email_to_2 || '');
-						$('input[name="email_subject_2"]').val(settings.email_subject_2 || '');
-						$('input[name="email_from_2"]').val(settings.email_from_2 || '');
-						$('input[name="email_from_name_2"]').val(settings.email_from_name_2 || '');
-						$('input[name="email_reply_to_2"]').val(settings.email_reply_to_2 || '');
-						$('input[name="email_to_cc_2"]').val(settings.email_to_cc_2 || '');
-						$('input[name="email_to_bcc_2"]').val(settings.email_to_bcc_2 || '');
-						$('input[name="redirect_to"]').val(settings.redirect_to || '');
-					} else {
-						alert('Error loading action settings: ' + (res.data ? res.data.message : 'Unknown error'));
-					}
-				});
-			});
-
-			$('#actions_modal_run_btn').on('click', function() {
-				var id = $('#actions_modal_sub_id').val();
-				var actions = [];
-				$('.action-cb:checked').each(function() {
-					actions.push($(this).val());
-				});
-				if (actions.length === 0) {
-					alert('Please select actions from the main screen first.');
-					return;
-				}
-
-				// Collect custom action settings
-				var customActions = {};
-				$('#actions_modal_form').serializeArray().forEach(function(item) {
-					if (item.value) {
-						customActions[item.name] = item.value;
-					}
-				});
-
-				$(this).text('Processing...').prop('disabled', true);
-
-				$.post(ajaxurl, {
-					action: '<?php echo self::AJAX_ACTION; ?>',
-					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
-					id: id,
-					target_actions: actions,
-					custom_action_settings: customActions
-				}, function(res) {
-					$('#actions_modal_run_btn').text('Run with Custom Actions').prop('disabled', false);
-					actionsModal.hide();
 					if (res.success) alert('Success: ' + res.data.message);
 					else alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
 				});
@@ -1015,68 +981,39 @@ class Elementor_Retrigger_Tool {
 			$data[ $val['key'] ] = $val['value'];
 		}
 
-		wp_send_json_success( $data );
-	}
+		/* Get form settings to retrieve actions and webhook URL */
+		$response = [ 'fields' => $data ];
+		$sub_data = $submission['data'];
+		$post_id  = isset( $sub_data['post']['id'] ) ? (int) $sub_data['post']['id'] : 0;
+		$elem_id  = isset( $sub_data['element_id'] ) ? $sub_data['element_id'] : '';
 
-	/* ------------------------------------------------------------------ */
-	/*  AJAX: Get form action settings
-	/* ------------------------------------------------------------------ */
-	public function ajax_get_form_actions() {
-		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
-		$id = absint( $_POST['id'] );
+		if ( $post_id && $elem_id ) {
+			$document = \Elementor\Plugin::$instance->documents->get( $post_id );
+			if ( $document ) {
+				$elements = $document->get_elements_data();
+				$widget   = $this->find_element_settings( $elements, $elem_id );
+				if ( $widget ) {
+					$response['actions']     = isset( $widget['submit_actions'] ) ? $widget['submit_actions'] : [];
+					$response['webhook_url'] = isset( $widget['webhooks'] ) ? $widget['webhooks'] : '';
 
-		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
-			wp_send_json_error( [ 'message' => 'Elementor Pro missing' ] );
+					/* Get all action logs for this submission to show what was actually executed */
+					global $wpdb;
+					$logs_table = $wpdb->prefix . 'e_submissions_actions_log';
+					$executed_actions = $wpdb->get_results(
+						$wpdb->prepare(
+							"SELECT DISTINCT action_name FROM $logs_table WHERE submission_id = %d ORDER BY id DESC",
+							$id
+						),
+						ARRAY_A
+					);
+					if ( $executed_actions ) {
+						$response['executed_actions'] = array_column( $executed_actions, 'action_name' );
+					}
+				}
+			}
 		}
 
-		$query      = \ElementorPro\Modules\Forms\Submissions\Database\Query::get_instance();
-		$submission = $query->get_submission( $id );
-
-		if ( ! $submission || empty( $submission['data'] ) ) {
-			wp_send_json_error( [ 'message' => 'Submission not found' ] );
-		}
-
-		$data    = $submission['data'];
-		$post_id = isset( $data['post']['id'] ) ? (int) $data['post']['id'] : 0;
-		$element_id = isset( $data['element_id'] ) ? $data['element_id'] : '';
-
-		if ( ! $post_id || ! $element_id ) {
-			wp_send_json_error( [ 'message' => 'Missing Post/Element ID' ] );
-		}
-
-		$document = \Elementor\Plugin::$instance->documents->get( $post_id );
-		if ( ! $document ) {
-			wp_send_json_error( [ 'message' => 'Original page no longer exists' ] );
-		}
-
-		$elements_data   = $document->get_elements_data();
-		$widget_settings = $this->find_element_settings( $elements_data, $element_id );
-
-		if ( ! $widget_settings ) {
-			wp_send_json_error( [ 'message' => 'Form widget not found' ] );
-		}
-
-		// Return relevant action settings
-		$action_settings = [
-			'webhook_url'         => $widget_settings['webhook_url'] ?? '',
-			'email_to'            => $widget_settings['email_to'] ?? '',
-			'email_subject'       => $widget_settings['email_subject'] ?? '',
-			'email_from'          => $widget_settings['email_from'] ?? '',
-			'email_from_name'     => $widget_settings['email_from_name'] ?? '',
-			'email_reply_to'      => $widget_settings['email_reply_to'] ?? '',
-			'email_to_cc'         => $widget_settings['email_to_cc'] ?? '',
-			'email_to_bcc'        => $widget_settings['email_to_bcc'] ?? '',
-			'email_to_2'          => $widget_settings['email_to_2'] ?? '',
-			'email_subject_2'     => $widget_settings['email_subject_2'] ?? '',
-			'email_from_2'        => $widget_settings['email_from_2'] ?? '',
-			'email_from_name_2'   => $widget_settings['email_from_name_2'] ?? '',
-			'email_reply_to_2'    => $widget_settings['email_reply_to_2'] ?? '',
-			'email_to_cc_2'       => $widget_settings['email_to_cc_2'] ?? '',
-			'email_to_bcc_2'      => $widget_settings['email_to_bcc_2'] ?? '',
-			'redirect_to'         => $widget_settings['redirect_to'] ?? '',
-		];
-
-		wp_send_json_success( $action_settings );
+		wp_send_json_success( $response );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -1088,16 +1025,16 @@ class Elementor_Retrigger_Tool {
 			wp_send_json_error( [ 'message' => 'Unauthorized' ] );
 		}
 
-		$id                    = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
-		$actions               = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
-		$custom_fields         = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
-		$custom_action_settings = isset( $_POST['custom_action_settings'] ) ? (array) $_POST['custom_action_settings'] : null;
+		$id            = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
+		$actions       = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
+		$custom_fields = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
+		$webhook_url   = isset( $_POST['webhook_url'] ) ? sanitize_text_field( $_POST['webhook_url'] ) : '';
 
 		if ( ! $id || empty( $actions ) ) {
 			wp_send_json_error( [ 'message' => 'Invalid Data' ] );
 		}
 
-		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $custom_action_settings );
+		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $webhook_url );
 
 		/* Prepare debug info (error or payload) */
 		$debug_info = $this->webhook_debug_info;
@@ -1105,16 +1042,11 @@ class Elementor_Retrigger_Tool {
 			$debug_info = "EDITED PAYLOAD:\n" . json_encode( $custom_fields, JSON_PRETTY_PRINT ) . "\n\n" . $debug_info;
 		}
 
-		// Prepare request/response data for logging
-		$request_data  = ! empty( $this->request_data ) ? json_encode( $this->request_data, JSON_PRETTY_PRINT ) : '';
-		$response_data = ! empty( $this->response_data ) ? json_encode( $this->response_data, JSON_PRETTY_PRINT ) : '';
-		$action_settings_log = ! empty( $this->action_settings_used ) ? json_encode( $this->action_settings_used, JSON_PRETTY_PRINT ) : '';
-
 		if ( is_wp_error( $result ) ) {
-			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info, $request_data, $response_data, $action_settings_log );
+			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info );
 			wp_send_json_error( [ 'message' => $result->get_error_message() ] );
 		} else {
-			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info, $request_data, $response_data, $action_settings_log );
+			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info );
 			wp_send_json_success( [ 'message' => implode( ', ', $result ) ] );
 		}
 	}
@@ -1122,21 +1054,18 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Logging
 	/* ------------------------------------------------------------------ */
-	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info, $request_data = '', $response_data = '', $action_settings_used = '' ) {
+	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info ) {
 		global $wpdb;
 		$table = $wpdb->prefix . self::LOG_TABLE;
 		$wpdb->insert(
 			$table,
 			[
-				'submission_id'        => $submission_id,
-				'actions'              => $actions,
-				'status'               => $status,
-				'message'              => $message,
-				'full_debug'           => $debug_info,
-				'request_data'         => $request_data,
-				'response_data'        => $response_data,
-				'action_settings_used' => $action_settings_used,
-				'created_at'           => current_time( 'mysql' ),
+				'submission_id' => $submission_id,
+				'actions'       => $actions,
+				'status'        => $status,
+				'message'       => $message,
+				'full_debug'    => $debug_info,
+				'created_at'    => current_time( 'mysql' ),
 			]
 		);
 	}
@@ -1144,7 +1073,7 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Execute retrigger
 	/* ------------------------------------------------------------------ */
-	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $custom_action_settings = null ) {
+	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $webhook_url = '' ) {
 		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
 			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
 		}
@@ -1195,18 +1124,12 @@ class Elementor_Retrigger_Tool {
 			return new WP_Error( 'no_widget', "Form Widget not found." );
 		}
 
-		$this->sanitize_settings( $widget_settings, $element_id );
-
-		// Apply custom action settings if provided
-		if ( is_array( $custom_action_settings ) ) {
-			foreach ( $custom_action_settings as $key => $value ) {
-				if ( ! empty( $value ) ) {
-					$widget_settings[ $key ] = $value;
-				}
-			}
-			// Store for logging
-			$this->action_settings_used = $custom_action_settings;
+		/* Override webhook URL if provided */
+		if ( ! empty( $webhook_url ) && ( in_array( 'webhook', $target_actions ) || in_array( 'webhooks', $target_actions ) ) ) {
+			$widget_settings['webhooks'] = $webhook_url;
 		}
+
+		$this->sanitize_settings( $widget_settings, $element_id );
 
 		$mock_record = $this->create_mock_record( $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data );
 		$mock_ajax   = new class {
@@ -1223,11 +1146,7 @@ class Elementor_Retrigger_Tool {
 
 		$executed          = [];
 		$actions_registry  = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' )->get_form_actions();
-
-		// Hook into webhooks to capture request/response
 		add_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ], 10, 2 );
-		add_filter( 'http_request_args', [ $this, 'capture_request_data' ], 10, 2 );
-		add_action( 'http_api_debug', [ $this, 'capture_response_data' ], 10, 5 );
 
 		foreach ( $target_actions as $action_slug ) {
 			$enabled_actions = $widget_settings['submit_actions'] ?? [];
@@ -1241,27 +1160,6 @@ class Elementor_Retrigger_Tool {
 						continue;
 					}
 					$this->webhook_debug_info = '';
-
-					// Reset request/response data for each action
-					$this->request_data = [];
-					$this->response_data = [];
-
-					// Store the payload being sent
-					if ( 'webhook' === $action_slug && ! empty( $widget_settings['webhook_url'] ) ) {
-						$this->request_data['webhook_url'] = $widget_settings['webhook_url'];
-						$this->request_data['form_data'] = $formatted_fields;
-					}
-					if ( 'email' === $action_slug ) {
-						$this->request_data['email_to'] = $widget_settings['email_to'] ?? '';
-						$this->request_data['email_subject'] = $widget_settings['email_subject'] ?? '';
-						$this->request_data['form_data'] = $formatted_fields;
-					}
-					if ( 'email2' === $action_slug ) {
-						$this->request_data['email_to_2'] = $widget_settings['email_to_2'] ?? '';
-						$this->request_data['email_subject_2'] = $widget_settings['email_subject_2'] ?? '';
-						$this->request_data['form_data'] = $formatted_fields;
-					}
-
 					$action_instance->run( $mock_record, $mock_ajax );
 					$query->add_action_log( $submission_id, $action_instance, 'success', 'Manual Re‑trigger via Tool' );
 					$executed[] = $action_slug;
@@ -1271,19 +1169,11 @@ class Elementor_Retrigger_Tool {
 					if ( empty( $this->webhook_debug_info ) ) {
 						$this->webhook_debug_info = $e->getMessage();
 					}
-					// Cleanup hooks before returning
-					remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
-					remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
-					remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
 					return new WP_Error( 'action_fail', "$action_slug failed: $error_msg" );
 				}
 			}
 		}
-
-		// Cleanup hooks
 		remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
-		remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
-		remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
 
 		if ( empty( $executed ) ) {
 			return new WP_Error( 'no_run', 'No matching enabled actions found.' );
@@ -1303,41 +1193,6 @@ class Elementor_Retrigger_Tool {
 				$msg  = wp_remote_retrieve_response_message( $response );
 				$body = wp_remote_retrieve_body( $response );
 				$this->webhook_debug_info = "HTTP $code ($msg). Response: $body";
-			}
-		}
-	}
-
-	/* ------------------------------------------------------------------ */
-	/*  Capture request data
-	/* ------------------------------------------------------------------ */
-	public function capture_request_data( $args, $url ) {
-		// Only capture requests that are likely from form actions
-		if ( strpos( $url, site_url() ) === false ) {
-			// External request - likely a webhook
-			$this->request_data['url'] = $url;
-			$this->request_data['method'] = $args['method'] ?? 'POST';
-			$this->request_data['headers'] = $args['headers'] ?? [];
-			$this->request_data['body'] = $args['body'] ?? '';
-			$this->request_data['timeout'] = $args['timeout'] ?? '';
-		}
-		return $args;
-	}
-
-	/* ------------------------------------------------------------------ */
-	/*  Capture response data
-	/* ------------------------------------------------------------------ */
-	public function capture_response_data( $response, $context, $class, $args, $url ) {
-		// Only capture responses from external URLs (webhooks)
-		if ( strpos( $url, site_url() ) === false && 'response' === $context ) {
-			if ( is_wp_error( $response ) ) {
-				$this->response_data['error'] = $response->get_error_message();
-				$this->response_data['error_code'] = $response->get_error_code();
-			} else {
-				$this->response_data['status_code'] = wp_remote_retrieve_response_code( $response );
-				$this->response_data['status_message'] = wp_remote_retrieve_response_message( $response );
-				$this->response_data['headers'] = wp_remote_retrieve_headers( $response )->getAll();
-				$this->response_data['body'] = wp_remote_retrieve_body( $response );
-				$this->response_data['body_length'] = strlen( $this->response_data['body'] );
 			}
 		}
 	}
@@ -1509,6 +1364,25 @@ class Elementor_Retrigger_Tool {
 	}
 
 	/* ------------------------------------------------------------------ */
+	/*  Get available actions
+	/* ------------------------------------------------------------------ */
+	private function get_available_actions() {
+		$available_actions = [];
+		if ( class_exists( '\ElementorPro\Plugin' ) ) {
+			$modules = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' );
+			if ( $modules ) {
+				foreach ( $modules->get_form_actions() as $slug => $instance ) {
+					if ( in_array( $slug, [ 'save-to-database', 'redirect' ], true ) ) {
+						continue;
+					}
+					$available_actions[ $slug ] = $instance->get_label();
+				}
+			}
+		}
+		return $available_actions;
+	}
+
+	/* ------------------------------------------------------------------ */
 	/*  Get unique form names (cached)
 	/* ------------------------------------------------------------------ */
 	private function get_unique_forms() {
@@ -1544,6 +1418,4 @@ class Elementor_Retrigger_Tool {
 }
 
 new Elementor_Retrigger_Tool();
-
-endif;
 
