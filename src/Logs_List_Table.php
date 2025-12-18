@@ -272,17 +272,39 @@ class Logs_List_Table extends \WP_List_Table {
 	 * @return string
 	 */
 	public function column_details( $item ) {
+		$buttons = [];
+
+		// Debug info button
 		if ( ! empty( $item->full_debug ) ) {
-			return sprintf(
-				'<button type="button" class="button button-small view-log-details" data-log-id="%d" data-debug="%s">
+			$buttons[] = sprintf(
+				'<button type="button" class="button button-small view-log-debug" data-log-id="%d" data-debug="%s">
 					<span class="dashicons dashicons-visibility" style="line-height:1.3;"></span> %s
 				</button>',
 				absint( $item->id ),
 				esc_attr( $item->full_debug ),
-				__( 'View', 'elementor-retrigger-tool' )
+				__( 'Debug', 'elementor-retrigger-tool' )
 			);
 		}
-		return '<span style="color:#999;">—</span>';
+
+		// Request/Response button
+		if ( ! empty( $item->request_data ) || ! empty( $item->response_data ) ) {
+			$buttons[] = sprintf(
+				'<button type="button" class="button button-small view-log-request-response"
+					data-log-id="%d"
+					data-request="%s"
+					data-response="%s"
+					data-submission-id="%d">
+					<span class="dashicons dashicons-editor-code" style="line-height:1.3;"></span> %s
+				</button>',
+				absint( $item->id ),
+				! empty( $item->request_data ) ? esc_attr( $item->request_data ) : '',
+				! empty( $item->response_data ) ? esc_attr( $item->response_data ) : '',
+				absint( $item->submission_id ),
+				__( 'Request/Response', 'elementor-retrigger-tool' )
+			);
+		}
+
+		return ! empty( $buttons ) ? implode( ' ', $buttons ) : '<span style="color:#999;">—</span>';
 	}
 
 	/**
