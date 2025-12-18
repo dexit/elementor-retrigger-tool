@@ -1692,3 +1692,5 @@ class Elementor_Retrigger_Tool {
 
 new Elementor_Retrigger_Tool();
 
+endif;
+
