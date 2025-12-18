@@ -1,0 +1,35 @@
+# Composer
+/vendor/
+composer.lock
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+
+# WordPress
+wp-config.php
+.htaccess
+
+# PHPUnit
+/phpunit.xml
+/.phpunit.result.cache
+
+# Build artifacts
+/build/
+/dist/
