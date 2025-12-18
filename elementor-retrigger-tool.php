@@ -18,6 +18,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Plugin constants
+ */
+define( 'ELEMENTOR_RETRIGGER_VERSION', '10.1.0' );
+define( 'ELEMENTOR_RETRIGGER_PLUGIN_FILE', __FILE__ );
+define( 'ELEMENTOR_RETRIGGER_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+define( 'ELEMENTOR_RETRIGGER_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
+define( 'ELEMENTOR_RETRIGGER_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
+
+/**
  * Autoloader for plugin classes
  *
  * @param string $class Class name.
@@ -25,7 +34,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 spl_autoload_register(
 	function ( $class ) {
 		$prefix   = 'ElementorRetriggerTool\\';
-		$base_dir = __DIR__ . '/src/';
+		$base_dir = ELEMENTOR_RETRIGGER_PLUGIN_DIR . 'src/';
 
 		$len = strlen( $prefix );
 		if ( strncmp( $prefix, $class, $len ) !== 0 ) {
@@ -125,6 +134,9 @@ class Elementor_Retrigger_Tool {
 	 * Sets up hooks for admin menu, AJAX, cron, and activation/deactivation.
 	 */
 	public function __construct() {
+		/* Load text domain for translations */
+		add_action( 'plugins_loaded', [ $this, 'load_textdomain' ] );
+
 		/* Admin UI */
 		add_action( 'admin_menu', [ $this, 'register_admin_menu' ], 150 );
 		add_action( 'admin_init', [ $this, 'init_plugin_logic' ] );
@@ -135,11 +147,31 @@ class Elementor_Retrigger_Tool {
 
 		/* Cron & Activation */
 		add_action( self::CRON_HOOK, [ $this, 'scheduled_log_cleanup' ] );
-		register_activation_hook( __FILE__, [ $this, 'activate_plugin' ] );
-		register_deactivation_hook( __FILE__, [ $this, 'deactivate_plugin' ] );
+		register_activation_hook( ELEMENTOR_RETRIGGER_PLUGIN_FILE, [ $this, 'activate_plugin' ] );
+		register_deactivation_hook( ELEMENTOR_RETRIGGER_PLUGIN_FILE, [ $this, 'deactivate_plugin' ] );
 
 		/* Admin Enhancements */
 		\ElementorRetriggerTool\Admin_Enhancements::init();
+
+		/**
+		 * Fires after Elementor Re-Trigger Tool is fully loaded
+		 *
+		 * @since 10.1.0
+		 */
+		do_action( 'elementor_retrigger_loaded' );
+	}
+
+	/**
+	 * Load plugin text domain for translations
+	 *
+	 * @since 10.1.0
+	 */
+	public function load_textdomain() {
+		load_plugin_textdomain(
+			'elementor-retrigger-tool',
+			false,
+			dirname( ELEMENTOR_RETRIGGER_PLUGIN_BASENAME ) . '/languages'
+		);
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -1253,7 +1285,38 @@ class Elementor_Retrigger_Tool {
 			$data['response_data'] = is_array( $response_data ) ? wp_json_encode( $response_data, JSON_PRETTY_PRINT ) : $response_data;
 		}
 
+		/**
+		 * Filter log data before saving to database
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param array $data  Log data to be inserted.
+		 * @param int   $submission_id  Submission ID.
+		 */
+		$data = apply_filters( 'elementor_retrigger_log_data', $data, $submission_id );
+
+		/**
+		 * Fires before log is saved to database
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param array $data           Log data.
+		 * @param int   $submission_id  Submission ID.
+		 */
+		do_action( 'elementor_retrigger_before_log', $data, $submission_id );
+
 		$wpdb->insert( $table, $data );
+
+		/**
+		 * Fires after log is saved to database
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param int   $log_id         Inserted log ID.
+		 * @param array $data           Log data.
+		 * @param int   $submission_id  Submission ID.
+		 */
+		do_action( 'elementor_retrigger_after_log', $wpdb->insert_id, $data, $submission_id );
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -1277,6 +1340,18 @@ class Elementor_Retrigger_Tool {
 	 * @return array|WP_Error Array of executed actions on success, WP_Error on failure.
 	 */
 	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $webhook_url = '' ) {
+		/**
+		 * Fires before re-trigger execution starts
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param int    $submission_id   Submission ID being retriggered.
+		 * @param array  $target_actions  Actions to execute.
+		 * @param array  $custom_fields   Custom field data (if any).
+		 * @param string $webhook_url     Webhook URL override (if any).
+		 */
+		do_action( 'elementor_retrigger_before_execute', $submission_id, $target_actions, $custom_fields, $webhook_url );
+
 		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
 			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
 		}
@@ -1290,16 +1365,37 @@ class Elementor_Retrigger_Tool {
 
 		$data = $submission_res['data'];
 
+		/**
+		 * Filter submission data before processing
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param array $data           Submission data from Elementor.
+		 * @param int   $submission_id  Submission ID.
+		 */
+		$data = apply_filters( 'elementor_retrigger_submission_data', $data, $submission_id );
+
 		/* Handle custom fields (edit mode) */
 		if ( is_array( $custom_fields ) ) {
 			$formatted_fields = $custom_fields;
 		} else {
-			$values          = isset( $data['values'] ) ? $data['values'] : [];
+			$values           = isset( $data['values'] ) ? $data['values'] : [];
 			$formatted_fields = [];
 			foreach ( $values as $val ) {
 				$formatted_fields[ $val['key'] ] = $val['value'];
 			}
 		}
+
+		/**
+		 * Filter formatted fields before creating record
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param array $formatted_fields  Form field data.
+		 * @param int   $submission_id     Submission ID.
+		 * @param array $custom_fields     Custom fields (if provided).
+		 */
+		$formatted_fields = apply_filters( 'elementor_retrigger_formatted_fields', $formatted_fields, $submission_id, $custom_fields );
 
 		$meta_data = [
 			'remote_ip'     => [ 'value' => $data['user_ip'] ?? '', 'title' => 'Remote IP' ],
@@ -1328,9 +1424,20 @@ class Elementor_Retrigger_Tool {
 		}
 
 		/* Override webhook URL if provided */
-		if ( ! empty( $webhook_url ) && ( in_array( 'webhook', $target_actions ) || in_array( 'webhooks', $target_actions ) ) ) {
+		if ( ! empty( $webhook_url ) && ( in_array( 'webhook', $target_actions, true ) || in_array( 'webhooks', $target_actions, true ) ) ) {
 			$widget_settings['webhooks'] = $webhook_url;
 		}
+
+		/**
+		 * Filter widget settings before re-trigger
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param array  $widget_settings  Form widget settings.
+		 * @param int    $submission_id    Submission ID.
+		 * @param string $webhook_url      Webhook URL override.
+		 */
+		$widget_settings = apply_filters( 'elementor_retrigger_widget_settings', $widget_settings, $submission_id, $webhook_url );
 
 		$this->sanitize_settings( $widget_settings, $element_id );
 
@@ -1381,6 +1488,18 @@ class Elementor_Retrigger_Tool {
 		if ( empty( $executed ) ) {
 			return new WP_Error( 'no_run', 'No matching enabled actions found.' );
 		}
+
+		/**
+		 * Fires after re-trigger execution completes successfully
+		 *
+		 * @since 10.1.0
+		 *
+		 * @param int   $submission_id   Submission ID.
+		 * @param array $executed        Array of executed action slugs.
+		 * @param array $target_actions  Array of requested actions.
+		 */
+		do_action( 'elementor_retrigger_after_execute', $submission_id, $executed, $target_actions );
+
 		return $executed;
 	}
 
