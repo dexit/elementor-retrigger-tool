@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Elementor Submission Re‑Trigger Tool
  * Plugin URI:  https://example.com/elementor-retrigger-tool
- * Description: Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
- * Version:     10.0.0
+ * Description: Enterprise-grade bulk re‑trigger for Elementor Pro submissions with CodeMirror, request/response logging, Import/Export, visual queue, edit modals, and comprehensive debugging.
+ * Version:     10.1.0
  * Author:      Custom Extension
  * Author URI:  https://example.com
  * Text Domain: elementor-retrigger-tool
@@ -17,30 +17,113 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit; // Exit if accessed directly.
 }
 
+/**
+ * Autoloader for plugin classes
+ *
+ * @param string $class Class name.
+ */
+spl_autoload_register(
+	function ( $class ) {
+		$prefix   = 'ElementorRetriggerTool\\';
+		$base_dir = __DIR__ . '/src/';
+
+		$len = strlen( $prefix );
+		if ( strncmp( $prefix, $class, $len ) !== 0 ) {
+			return;
+		}
+
+		$relative_class = substr( $class, $len );
+		$file           = $base_dir . str_replace( '\\', '/', $relative_class ) . '.php';
+
+		if ( file_exists( $file ) ) {
+			require $file;
+		}
+	}
+);
+
 if ( ! class_exists( 'Elementor_Retrigger_Tool' ) ) :
 
+/**
+ * Main Plugin Class
+ *
+ * Handles bulk re-triggering of Elementor Pro form submissions with:
+ * - Visual queue management
+ * - Edit payload modal
+ * - Full debugging and logging
+ * - Cron-based cleanup
+ * - WordPress standards-compliant UI
+ *
+ * @package ElementorRetriggerTool
+ * @version 10.0.0
+ */
 class Elementor_Retrigger_Tool {
 
 	/* ------------------------------------------------------------------ */
 	/*  Constants
 	/* ------------------------------------------------------------------ */
-	const PAGE_SLUG          = 'e-retrigger-tool';
-	const AJAX_ACTION        = 'e_retrigger_process';
-	const AJAX_GET_DATA      = 'e_retrigger_get_data';
-	const LOG_TABLE          = 'e_retrigger_logs';
-	const OPTION_RETENTION   = 'e_retrigger_retention_days';
-	const CRON_HOOK          = 'e_retrigger_daily_cleanup_event';
-	const PER_PAGE           = 20;
+
+	/**
+	 * Admin page slug
+	 */
+	const PAGE_SLUG = 'e-retrigger-tool';
+
+	/**
+	 * AJAX action for processing requests
+	 */
+	const AJAX_ACTION = 'e_retrigger_process';
+
+	/**
+	 * AJAX action for getting submission data
+	 */
+	const AJAX_GET_DATA = 'e_retrigger_get_data';
+
+	/**
+	 * Database table name (without prefix)
+	 */
+	const LOG_TABLE = 'e_retrigger_logs';
+
+	/**
+	 * Option name for retention days
+	 */
+	const OPTION_RETENTION = 'e_retrigger_retention_days';
+
+	/**
+	 * Cron hook name
+	 */
+	const CRON_HOOK = 'e_retrigger_daily_cleanup_event';
+
+	/**
+	 * Items per page
+	 */
+	const PER_PAGE = 20;
 
 	/* ------------------------------------------------------------------ */
 	/*  Properties
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Webhook debug information buffer
+	 *
+	 * @var string
+	 */
 	private $webhook_debug_info = '';
+
+	/**
+	 * Execution log buffer
+	 *
+	 * @var string
+	 */
 	private $execution_log_buffer = '';
 
 	/* ------------------------------------------------------------------ */
 	/*  Constructor
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Initialize the plugin
+	 *
+	 * Sets up hooks for admin menu, AJAX, cron, and activation/deactivation.
+	 */
 	public function __construct() {
 		/* Admin UI */
 		add_action( 'admin_menu', [ $this, 'register_admin_menu' ], 150 );
@@ -54,11 +137,20 @@ class Elementor_Retrigger_Tool {
 		add_action( self::CRON_HOOK, [ $this, 'scheduled_log_cleanup' ] );
 		register_activation_hook( __FILE__, [ $this, 'activate_plugin' ] );
 		register_deactivation_hook( __FILE__, [ $this, 'deactivate_plugin' ] );
+
+		/* Admin Enhancements */
+		\ElementorRetriggerTool\Admin_Enhancements::init();
 	}
 
 	/* ------------------------------------------------------------------ */
 	/*  Activation / Deactivation
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Plugin activation hook
+	 *
+	 * Creates database tables and schedules cron job.
+	 */
 	public function activate_plugin() {
 		$this->check_db_install();
 
@@ -67,6 +159,11 @@ class Elementor_Retrigger_Tool {
 		}
 	}
 
+	/**
+	 * Plugin deactivation hook
+	 *
+	 * Clears scheduled cron job.
+	 */
 	public function deactivate_plugin() {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 	}
@@ -74,6 +171,12 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Init
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Initialize plugin logic on admin_init
+	 *
+	 * Checks database and handles settings save.
+	 */
 	public function init_plugin_logic() {
 		$this->check_db_install();
 		$this->handle_settings_save();
@@ -82,13 +185,18 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Database
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Check and create database tables if needed
+	 *
+	 * Uses dbDelta for safe table creation/updates.
+	 * Version 2.0 adds request_data and response_data columns for enhanced logging.
+	 */
 	public function check_db_install() {
-		if ( get_option( 'e_retrigger_db_ver' ) === '1.0' ) {
-			return;
-		}
+		$current_version = get_option( 'e_retrigger_db_ver', '0' );
 
 		global $wpdb;
-		$table_name     = $wpdb->prefix . self::LOG_TABLE;
+		$table_name      = $wpdb->prefix . self::LOG_TABLE;
 		$charset_collate = $wpdb->get_charset_collate();
 
 		$sql = "CREATE TABLE $table_name (
@@ -98,21 +206,30 @@ class Elementor_Retrigger_Tool {
 			status varchar(20) NOT NULL,
 			message text NOT NULL,
 			full_debug text,
+			request_data longtext,
+			response_data longtext,
 			created_at datetime DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			KEY submission_id (submission_id),
-			KEY created_at (created_at)
+			KEY created_at (created_at),
+			KEY status (status)
 		) $charset_collate;";
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 
-		update_option( 'e_retrigger_db_ver', '1.0' );
+		update_option( 'e_retrigger_db_ver', '2.0' );
 	}
 
 	/* ------------------------------------------------------------------ */
 	/*  Cron
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Scheduled log cleanup callback
+	 *
+	 * Runs daily to clean up old logs based on retention settings.
+	 */
 	public function scheduled_log_cleanup() {
 		$days = (int) get_option( self::OPTION_RETENTION, 30 );
 		if ( $days <= 0 ) {
@@ -121,6 +238,11 @@ class Elementor_Retrigger_Tool {
 		$this->run_cleanup_query( $days );
 	}
 
+	/**
+	 * Run cleanup query to delete old logs
+	 *
+	 * @param int $days Number of days to retain.
+	 */
 	private function run_cleanup_query( $days ) {
 		global $wpdb;
 		$table = $wpdb->prefix . self::LOG_TABLE;
@@ -135,6 +257,12 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Settings
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Handle settings form submission
+	 *
+	 * Processes retention settings and manual cleanup requests.
+	 */
 	private function handle_settings_save() {
 		if (
 			isset( $_POST['e_retrigger_save_settings'] ) &&
@@ -169,18 +297,20 @@ class Elementor_Retrigger_Tool {
 	}
 
 	public function render_main_wrapper() {
-		$active_tab = isset( $_GET['tab'] ) ? $_GET['tab'] : 'run';
+		$active_tab = isset( $_GET['tab'] ) ? sanitize_text_field( $_GET['tab'] ) : 'run';
 		?>
 		<div class="wrap">
 			<h1 class="wp-heading-inline">Elementor Submission Re‑Trigger Tool</h1>
 			<hr class="wp-header-end">
 			<nav class="nav-tab-wrapper">
-				<a href="?page=<?php echo self::PAGE_SLUG; ?>&tab=run"
-				   class="nav-tab <?php echo $active_tab == 'run' ? 'nav-tab-active' : ''; ?>">Run Tool</a>
-				<a href="?page=<?php echo self::PAGE_SLUG; ?>&tab=logs"
-				   class="nav-tab <?php echo $active_tab == 'logs' ? 'nav-tab-active' : ''; ?>">Logs & History</a>
-				<a href="?page=<?php echo self::PAGE_SLUG; ?>&tab=settings"
-				   class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>">Settings</a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=run"
+				   class="nav-tab <?php echo $active_tab === 'run' ? 'nav-tab-active' : ''; ?>">Run Tool</a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=logs"
+				   class="nav-tab <?php echo $active_tab === 'logs' ? 'nav-tab-active' : ''; ?>">Logs & History</a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=settings"
+				   class="nav-tab <?php echo $active_tab === 'settings' ? 'nav-tab-active' : ''; ?>">Settings</a>
+				<a href="?page=<?php echo esc_attr( self::PAGE_SLUG ); ?>&tab=import-export"
+				   class="nav-tab <?php echo $active_tab === 'import-export' ? 'nav-tab-active' : ''; ?>">Import / Export</a>
 			</nav>
 
 			<div style="margin-top: 20px;">
@@ -191,6 +321,9 @@ class Elementor_Retrigger_Tool {
 						break;
 					case 'settings':
 						$this->render_settings_view();
+						break;
+					case 'import-export':
+						\ElementorRetriggerTool\Admin_Enhancements::render_import_export_tab();
 						break;
 					default:
 						$this->render_run_tool();
@@ -252,194 +385,174 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Logs View
 	/* ------------------------------------------------------------------ */
+	/**
+	 * Render logs view using WP_List_Table
+	 *
+	 * Professional implementation with WordPress standards-compliant table,
+	 * pagination, sorting, filtering, bulk actions, and enhanced modals with CodeMirror.
+	 */
 	private function render_logs_view() {
-		global $wpdb;
-		$table = $wpdb->prefix . self::LOG_TABLE;
+		// Show settings errors/notices
+		settings_errors( 'e_retrigger' );
 
-		/* Handle bulk delete action */
-		if ( isset( $_POST['action'] ) && $_POST['action'] === 'delete' && isset( $_POST['log_ids'] ) && check_admin_referer( 'bulk-logs' ) ) {
-			$log_ids = array_map( 'absint', $_POST['log_ids'] );
-			if ( ! empty( $log_ids ) ) {
-				$placeholders = implode( ',', array_fill( 0, count( $log_ids ), '%d' ) );
-				$wpdb->query( $wpdb->prepare( "DELETE FROM $table WHERE id IN ($placeholders)", $log_ids ) );
-				echo '<div class="notice notice-success is-dismissible"><p>Deleted ' . count( $log_ids ) . ' log(s).</p></div>';
-			}
-		}
-
-		$paged        = isset( $_GET['paged'] ) ? max( 1, absint( $_GET['paged'] ) ) : 1;
-		$orderby      = isset( $_GET['orderby'] ) ? sanitize_text_field( $_GET['orderby'] ) : 'created_at';
-		$order        = isset( $_GET['order'] ) ? sanitize_text_field( $_GET['order'] ) : 'DESC';
-		$search       = isset( $_GET['s'] ) ? sanitize_text_field( $_GET['s'] ) : '';
-		$filter_status = isset( $_GET['filter_status'] ) ? sanitize_text_field( $_GET['filter_status'] ) : '';
-		$offset       = ( $paged - 1 ) * self::PER_PAGE;
-
-		/* Build WHERE clause for search and filters */
-		$where = [];
-		$params = [];
-		if ( ! empty( $search ) ) {
-			$where[] = "(submission_id LIKE %s OR message LIKE %s OR actions LIKE %s)";
-			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
-			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
-			$params[] = '%' . $wpdb->esc_like( $search ) . '%';
-		}
-		if ( ! empty( $filter_status ) ) {
-			$where[] = "status = %s";
-			$params[] = $filter_status;
-		}
-		$where_sql = ! empty( $where ) ? ' WHERE ' . implode( ' AND ', $where ) : '';
-
-		$total_items = $wpdb->get_var(
-			empty( $params ) ? "SELECT COUNT(*) FROM $table $where_sql" : $wpdb->prepare( "SELECT COUNT(*) FROM $table $where_sql", $params )
-		);
-		$total_pages = ceil( $total_items / self::PER_PAGE );
-
-		$sql = "SELECT * FROM $table $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
-		$params[] = self::PER_PAGE;
-		$params[] = $offset;
-		$logs = $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
-
-		$base_url = admin_url( 'admin.php?page=' . self::PAGE_SLUG . '&tab=logs' );
-		$sort_link = function ( $col ) use ( $base_url, $orderby, $order, $search, $filter_status ) {
-			$new_order = ( $orderby === $col && $order === 'DESC' ) ? 'ASC' : 'DESC';
-			return esc_url( add_query_arg( [ 'orderby' => $col, 'order' => $new_order, 's' => $search, 'filter_status' => $filter_status ], $base_url ) );
-		};
+		// Create and prepare the table
+		$logs_table = new \ElementorRetriggerTool\Logs_List_Table();
+		$logs_table->prepare_items();
 		?>
 
 		<!-- Modal for viewing debug info -->
 		<div id="log_debug_modal" class="e-retrigger-modal" style="display:none;">
 			<div class="e-retrigger-modal-content" style="max-width:900px;">
 				<span class="e-retrigger-close">&times;</span>
-				<h2>Log Details</h2>
+				<h2><?php esc_html_e( 'Debug Information', 'elementor-retrigger-tool' ); ?></h2>
 				<div id="log_debug_content" style="background:#f0f0f1; padding:15px; max-height:500px; overflow:auto;">
 					<pre style="white-space:pre-wrap; font-size:12px; margin:0;"></pre>
 				</div>
 			</div>
 		</div>
 
+		<!-- Modal for viewing Request/Response with CodeMirror -->
+		<div id="log_request_response_modal" class="e-retrigger-modal" style="display:none;">
+			<div class="e-retrigger-modal-content e-retrigger-modal-large">
+				<span class="e-retrigger-close">&times;</span>
+				<h2><?php esc_html_e( 'Request / Response Data', 'elementor-retrigger-tool' ); ?></h2>
+				<p style="color:#666; margin-bottom:15px;"><?php esc_html_e( 'View the complete request payload and response data in JSON format.', 'elementor-retrigger-tool' ); ?></p>
+
+				<!-- Tabs -->
+				<div class="e-retrigger-tabs">
+					<div class="e-retrigger-tab active" data-target="request-tab"><?php esc_html_e( 'Request', 'elementor-retrigger-tool' ); ?></div>
+					<div class="e-retrigger-tab" data-target="response-tab"><?php esc_html_e( 'Response', 'elementor-retrigger-tool' ); ?></div>
+					<div class="e-retrigger-tab" data-target="raw-tab"><?php esc_html_e( 'Raw Data', 'elementor-retrigger-tool' ); ?></div>
+				</div>
+
+				<!-- Request Tab -->
+				<div id="request-tab" class="e-retrigger-tab-content active">
+					<div class="code-editor-wrapper">
+						<textarea id="request-editor" style="width:100%; height:400px;"></textarea>
+					</div>
+					<div style="margin-top:10px;">
+						<button type="button" class="button format-json-btn" data-editor="request-editor">
+							<span class="dashicons dashicons-admin-appearance" style="line-height:1.3;"></span> <?php esc_html_e( 'Format JSON', 'elementor-retrigger-tool' ); ?>
+						</button>
+						<button type="button" class="button copy-to-clipboard-btn" data-editor="request-editor">
+							<span class="dashicons dashicons-clipboard" style="line-height:1.3;"></span> <?php esc_html_e( 'Copy to Clipboard', 'elementor-retrigger-tool' ); ?>
+						</button>
+					</div>
+				</div>
+
+				<!-- Response Tab -->
+				<div id="response-tab" class="e-retrigger-tab-content">
+					<div class="code-editor-wrapper">
+						<textarea id="response-editor" style="width:100%; height:400px;"></textarea>
+					</div>
+					<div style="margin-top:10px;">
+						<button type="button" class="button format-json-btn" data-editor="response-editor">
+							<span class="dashicons dashicons-admin-appearance" style="line-height:1.3;"></span> <?php esc_html_e( 'Format JSON', 'elementor-retrigger-tool' ); ?>
+						</button>
+						<button type="button" class="button copy-to-clipboard-btn" data-editor="response-editor">
+							<span class="dashicons dashicons-clipboard" style="line-height:1.3;"></span> <?php esc_html_e( 'Copy to Clipboard', 'elementor-retrigger-tool' ); ?>
+						</button>
+					</div>
+				</div>
+
+				<!-- Raw Data Tab -->
+				<div id="raw-tab" class="e-retrigger-tab-content">
+					<div id="raw-data-content" style="background:#f8f9fa; padding:15px; border-radius:4px; max-height:500px; overflow:auto;">
+						<pre style="white-space:pre-wrap; font-size:12px; margin:0;"></pre>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<div class="card" style="padding:15px; max-width: 100%;">
-			<!-- Search and Filter Form -->
-			<form method="get" style="margin-bottom:15px;">
-				<input type="hidden" name="page" value="<?php echo self::PAGE_SLUG; ?>">
-				<input type="hidden" name="tab" value="logs">
-				<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-					<input type="search" name="s" value="<?php echo esc_attr( $search ); ?>" placeholder="Search logs..." style="flex:1; min-width:200px;">
-					<select name="filter_status" style="width:150px;">
-						<option value="">All Statuses</option>
-						<option value="success" <?php selected( $filter_status, 'success' ); ?>>Success</option>
-						<option value="failed" <?php selected( $filter_status, 'failed' ); ?>>Failed</option>
-					</select>
-					<button type="submit" class="button">Filter</button>
-					<a href="<?php echo esc_url( $base_url ); ?>" class="button">Reset</a>
-				</div>
-			</form>
-
-			<!-- Bulk Actions Form -->
 			<form method="post" id="logs-filter">
-				<?php wp_nonce_field( 'bulk-logs' ); ?>
-				<div class="tablenav top" style="margin-bottom:10px;">
-					<div class="alignleft actions bulkactions">
-						<select name="action">
-							<option value="-1">Bulk Actions</option>
-							<option value="delete">Delete</option>
-						</select>
-						<button type="submit" class="button action">Apply</button>
-					</div>
-					<div class="tablenav-pages" style="float:right;">
-						<span class="displaying-num"><?php echo $total_items; ?> items</span>
-					</div>
-				</div>
-
-				<table class="wp-list-table widefat fixed striped">
-					<thead>
-						<tr>
-							<td class="manage-column column-cb check-column"><input type="checkbox" id="cb-select-all-logs"></td>
-							<th width="160"><a href="<?php echo $sort_link( 'created_at' ); ?>">Date</a></th>
-							<th width="100"><a href="<?php echo $sort_link( 'submission_id' ); ?>">Sub ID</a></th>
-							<th width="150">Actions</th>
-							<th width="100"><a href="<?php echo $sort_link( 'status' ); ?>">Status</a></th>
-							<th>Message</th>
-							<th width="80">Details</th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php if ( empty( $logs ) ) : ?>
-							<tr><td colspan="7">No logs found.</td></tr>
-						<?php else : ?>
-							<?php foreach ( $logs as $log ) : ?>
-								<?php
-								$color = $log->status === 'success' ? '#46b450' : '#dc3232';
-								$status_badge = sprintf(
-									'<span style="color:#fff; background:%s; padding: 3px 8px; border-radius: 3px; font-size: 10px; text-transform: uppercase;">%s</span>',
-									$color,
-									$log->status
-								);
-								$sub_link = admin_url( 'admin.php?page=e-form-submissions&action=view&id=' . $log->submission_id );
-								?>
-								<tr>
-									<th scope="row" class="check-column">
-										<input type="checkbox" name="log_ids[]" value="<?php echo esc_attr( $log->id ); ?>" class="log-checkbox">
-									</th>
-									<td><?php echo esc_html( $log->created_at ); ?></td>
-									<td><a href="<?php echo esc_url( $sub_link ); ?>" target="_blank">#<?php echo esc_html( $log->submission_id ); ?> <span class="dashicons dashicons-external"></span></a></td>
-									<td><?php echo esc_html( $log->actions ); ?></td>
-									<td><?php echo $status_badge; ?></td>
-									<td><strong><?php echo esc_html( $log->message ); ?></strong></td>
-									<td>
-										<?php if ( ! empty( $log->full_debug ) ) : ?>
-											<button type="button" class="button button-small view-log-details" data-log-id="<?php echo esc_attr( $log->id ); ?>" data-debug="<?php echo esc_attr( $log->full_debug ); ?>">
-												<span class="dashicons dashicons-visibility" style="line-height:1.3;"></span> View
-											</button>
-										<?php else : ?>
-											<span style="color:#999;">—</span>
-										<?php endif; ?>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-						<?php endif; ?>
-					</tbody>
-				</table>
-
-				<?php if ( $total_pages > 1 ) : ?>
-					<div class="tablenav bottom">
-						<div class="tablenav-pages">
-							<?php
-							echo paginate_links(
-								[
-									'base'     => add_query_arg( [ 'paged' => '%#%', 's' => $search, 'filter_status' => $filter_status ] ),
-									'format'   => '',
-									'total'    => $total_pages,
-									'current'  => $paged,
-								]
-							);
-							?>
-						</div>
-					</div>
-				<?php endif; ?>
+				<input type="hidden" name="page" value="<?php echo esc_attr( self::PAGE_SLUG ); ?>">
+				<input type="hidden" name="tab" value="logs">
+				<?php
+				$logs_table->search_box( __( 'Search logs', 'elementor-retrigger-tool' ), 'log' );
+				$logs_table->display();
+				?>
 			</form>
 		</div>
 
+		<style>
+			.e-retrigger-modal { display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; overflow:auto; background-color:rgba(0,0,0,0.5); }
+			.e-retrigger-modal-content { background:#fefefe; margin:5% auto; padding:20px; border:1px solid #888; width:auto; max-width:900px; box-shadow:0 4px 10px rgba(0,0,0,0.2); border-radius:5px; }
+			.e-retrigger-close { color:#aaa; float:right; font-size:28px; font-weight:bold; cursor:pointer; }
+			.e-retrigger-close:hover { color:black; }
+		</style>
+
 		<script type="text/javascript">
 		jQuery(document).ready(function($) {
-			/* Select all checkbox */
-			$('#cb-select-all-logs').on('click', function() {
-				$('.log-checkbox').prop('checked', this.checked);
-			});
+			var logDebugModal = $('#log_debug_modal');
+			var logRequestResponseModal = $('#log_request_response_modal');
+			var requestEditor, responseEditor;
 
-			/* View log details in modal */
-			var logModal = $('#log_debug_modal');
-			$('.view-log-details').on('click', function() {
+			/* View debug info */
+			$('.view-log-debug').on('click', function() {
 				var debug = $(this).data('debug');
 				$('#log_debug_content pre').text(debug);
-				logModal.show();
+				logDebugModal.show();
 			});
 
+			/* View request/response with CodeMirror */
+			$('.view-log-request-response').on('click', function() {
+				var requestData = $(this).data('request');
+				var responseData = $(this).data('response');
+				var submissionId = $(this).data('submission-id');
+
+				// Show modal
+				logRequestResponseModal.show();
+
+				// Initialize CodeMirror editors if not already initialized
+				if (!requestEditor && window.eRetriggerCodeEditor) {
+					requestEditor = window.eRetriggerCodeEditor.init('request-editor', { readOnly: true });
+				}
+				if (!responseEditor && window.eRetriggerCodeEditor) {
+					responseEditor = window.eRetriggerCodeEditor.init('response-editor', { readOnly: true });
+				}
+
+				// Set editor values
+				if (requestEditor) {
+					try {
+						var requestJson = typeof requestData === 'string' ? JSON.parse(requestData) : requestData;
+						requestEditor.setValue(JSON.stringify(requestJson, null, 2));
+					} catch (e) {
+						requestEditor.setValue(requestData || 'No request data available');
+					}
+				}
+
+				if (responseEditor) {
+					try {
+						var responseJson = typeof responseData === 'string' ? JSON.parse(responseData) : responseData;
+						responseEditor.setValue(JSON.stringify(responseJson, null, 2));
+					} catch (e) {
+						responseEditor.setValue(responseData || 'No response data available');
+					}
+				}
+
+				// Set raw data
+				var rawData = 'Submission ID: ' + submissionId + '\n\n';
+				rawData += '=== REQUEST DATA ===\n' + (requestData || 'N/A') + '\n\n';
+				rawData += '=== RESPONSE DATA ===\n' + (responseData || 'N/A');
+				$('#raw-data-content pre').text(rawData);
+
+				// Activate first tab
+				$('.e-retrigger-tab:first').trigger('click');
+			});
+
+			/* Close modals */
 			$('.e-retrigger-close').on('click', function() {
-				logModal.hide();
+				logDebugModal.hide();
+				logRequestResponseModal.hide();
 			});
 
 			$(window).on('click', function(e) {
-				if ($(e.target).is(logModal)) {
-					logModal.hide();
+				if ($(e.target).is(logDebugModal)) {
+					logDebugModal.hide();
+				}
+				if ($(e.target).is(logRequestResponseModal)) {
+					logRequestResponseModal.hide();
 				}
 			});
 		});
@@ -961,6 +1074,13 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  AJAX: Get submission data for modal
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * AJAX handler to get submission data for edit modal
+	 *
+	 * Retrieves submission fields, actions, webhook URL, and execution history.
+	 * Used by the edit payload modal to populate form data.
+	 */
 	public function ajax_get_submission_data() {
 		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
 		$id = absint( $_POST['id'] );
@@ -1019,6 +1139,13 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  AJAX: Process request
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * AJAX handler to process re-trigger requests
+	 *
+	 * Handles both batch queue processing and individual edits.
+	 * Validates permissions, sanitizes inputs, executes actions, and logs results.
+	 */
 	public function ajax_process_request() {
 		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
 		if ( ! current_user_can( 'manage_options' ) ) {
@@ -1036,17 +1163,55 @@ class Elementor_Retrigger_Tool {
 
 		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $webhook_url );
 
-		/* Prepare debug info (error or payload) */
+		/* Prepare debug info and request data */
 		$debug_info = $this->webhook_debug_info;
+		$request_data = [
+			'submission_id' => $id,
+			'actions'       => $actions,
+			'webhook_url'   => $webhook_url,
+			'timestamp'     => current_time( 'mysql' ),
+		];
+
 		if ( is_array( $custom_fields ) ) {
-			$debug_info = "EDITED PAYLOAD:\n" . json_encode( $custom_fields, JSON_PRETTY_PRINT ) . "\n\n" . $debug_info;
+			$request_data['custom_fields'] = $custom_fields;
+			$debug_info = "EDITED PAYLOAD:\n" . wp_json_encode( $custom_fields, JSON_PRETTY_PRINT ) . "\n\n" . $debug_info;
 		}
 
 		if ( is_wp_error( $result ) ) {
-			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info );
+			$response_data = [
+				'error'   => true,
+				'message' => $result->get_error_message(),
+				'code'    => $result->get_error_code(),
+			];
+
+			$this->log_to_db(
+				$id,
+				implode( ',', $actions ),
+				'failed',
+				$result->get_error_message(),
+				$debug_info,
+				$request_data,
+				$response_data
+			);
+
 			wp_send_json_error( [ 'message' => $result->get_error_message() ] );
 		} else {
-			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info );
+			$response_data = [
+				'success'          => true,
+				'executed_actions' => is_array( $result ) ? $result : [],
+				'message'          => 'Actions executed successfully',
+			];
+
+			$this->log_to_db(
+				$id,
+				implode( ',', $actions ),
+				'success',
+				'Actions executed successfully',
+				$debug_info,
+				$request_data,
+				$response_data
+			);
+
 			wp_send_json_success( [ 'message' => implode( ', ', $result ) ] );
 		}
 	}
@@ -1054,25 +1219,63 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Logging
 	/* ------------------------------------------------------------------ */
-	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info ) {
+
+	/**
+	 * Log re-trigger result to database
+	 *
+	 * @param int    $submission_id  Submission ID.
+	 * @param string $actions        Comma-separated action names.
+	 * @param string $status         'success' or 'failed'.
+	 * @param string $message        Result message.
+	 * @param string $debug_info     Full debug information.
+	 * @param array  $request_data   Optional request data.
+	 * @param array  $response_data  Optional response data.
+	 */
+	private function log_to_db( $submission_id, $actions, $status, $message, $debug_info, $request_data = null, $response_data = null ) {
 		global $wpdb;
 		$table = $wpdb->prefix . self::LOG_TABLE;
-		$wpdb->insert(
-			$table,
-			[
-				'submission_id' => $submission_id,
-				'actions'       => $actions,
-				'status'        => $status,
-				'message'       => $message,
-				'full_debug'    => $debug_info,
-				'created_at'    => current_time( 'mysql' ),
-			]
-		);
+
+		$data = [
+			'submission_id' => $submission_id,
+			'actions'       => $actions,
+			'status'        => $status,
+			'message'       => $message,
+			'full_debug'    => $debug_info,
+			'created_at'    => current_time( 'mysql' ),
+		];
+
+		// Add request/response data if provided
+		if ( $request_data !== null ) {
+			$data['request_data'] = is_array( $request_data ) ? wp_json_encode( $request_data, JSON_PRETTY_PRINT ) : $request_data;
+		}
+
+		if ( $response_data !== null ) {
+			$data['response_data'] = is_array( $response_data ) ? wp_json_encode( $response_data, JSON_PRETTY_PRINT ) : $response_data;
+		}
+
+		$wpdb->insert( $table, $data );
 	}
 
 	/* ------------------------------------------------------------------ */
 	/*  Execute retrigger
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Execute re-trigger for a submission
+	 *
+	 * This is the core method that:
+	 * 1. Retrieves submission data from Elementor
+	 * 2. Optionally merges custom/edited fields
+	 * 3. Recreates the Elementor record object
+	 * 4. Runs selected actions through Elementor's action registry
+	 * 5. Logs results to submission action log
+	 *
+	 * @param int         $submission_id   Submission ID to retrigger.
+	 * @param array       $target_actions  Array of action slugs to execute.
+	 * @param array|null  $custom_fields   Optional custom/edited field data.
+	 * @param string      $webhook_url     Optional webhook URL override.
+	 * @return array|WP_Error Array of executed actions on success, WP_Error on failure.
+	 */
 	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $webhook_url = '' ) {
 		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
 			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
@@ -1184,6 +1387,16 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Capture webhook error
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Capture webhook response for debugging
+	 *
+	 * Hooked into elementor_pro/forms/webhooks/response to capture
+	 * webhook errors and non-200 responses for logging.
+	 *
+	 * @param mixed $response WP_HTTP response or WP_Error.
+	 * @param mixed $record   Elementor record object.
+	 */
 	public function capture_webhook_error( $response, $record ) {
 		if ( is_wp_error( $response ) ) {
 			$this->webhook_debug_info = 'WP Error: ' . $response->get_error_message();
@@ -1200,6 +1413,16 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Sanitize settings
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Sanitize and ensure required settings exist
+	 *
+	 * Elementor actions expect certain settings to be present.
+	 * This method ensures all required keys exist with defaults.
+	 *
+	 * @param array  &$settings   Settings array (passed by reference).
+	 * @param string $element_id  Element ID.
+	 */
 	private function sanitize_settings( &$settings, $element_id ) {
 		$settings['id']          = $element_id;
 		$settings['form_name']   = $settings['form_name'] ?? 'Elementor Form';
@@ -1246,6 +1469,20 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Create mock record
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Create mock Elementor record object
+	 *
+	 * Creates an anonymous class that mimics Elementor's Form_Record
+	 * to satisfy action handlers' expectations.
+	 *
+	 * @param array  $fields    Form field data.
+	 * @param array  $settings  Form settings.
+	 * @param int    $post_id   Post ID.
+	 * @param string $form_id   Form/element ID.
+	 * @param array  $meta      Meta data (IP, user agent, etc.).
+	 * @return object Anonymous class instance.
+	 */
 	private function create_mock_record( $fields, $settings, $post_id, $form_id, $meta ) {
 		return new class( $fields, $settings, $post_id, $form_id, $meta ) {
 			private $fields, $settings, $post_id, $form_id, $meta;
@@ -1319,6 +1556,18 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Get filtered submissions (for the Run Tool)
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Get filtered submissions for Run Tool table
+	 *
+	 * @param string $form_name Form name filter.
+	 * @param string $date      Date filter (YYYY-MM-DD).
+	 * @param string $search    Search term (email or ID).
+	 * @param int    $paged     Current page number.
+	 * @param string $orderby   Column to order by.
+	 * @param string $order     Order direction (ASC/DESC).
+	 * @return array Array with 'rows' and 'total' keys.
+	 */
 	private function get_filtered_submissions( $form_name = '', $date = '', $search = '', $paged = 1, $orderby = 'created_at', $order = 'DESC' ) {
 		global $wpdb;
 		$table      = $wpdb->prefix . 'e_submissions';
@@ -1366,6 +1615,14 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Get available actions
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Get available Elementor form actions
+	 *
+	 * Excludes 'save-to-database' and 'redirect' as they're not retriggerable.
+	 *
+	 * @return array Array of action_slug => label pairs.
+	 */
 	private function get_available_actions() {
 		$available_actions = [];
 		if ( class_exists( '\ElementorPro\Plugin' ) ) {
@@ -1385,6 +1642,14 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Get unique form names (cached)
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Get unique form names from submissions
+	 *
+	 * Cached for 12 hours for performance.
+	 *
+	 * @return array Array of form names.
+	 */
 	private function get_unique_forms() {
 		if ( false === ( $forms = get_transient( 'e_retrigger_forms' ) ) ) {
 			global $wpdb;
@@ -1401,6 +1666,14 @@ class Elementor_Retrigger_Tool {
 	/* ------------------------------------------------------------------ */
 	/*  Find element settings in nested element tree
 	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Recursively find element settings in Elementor's nested element tree
+	 *
+	 * @param array  $elements   Elements array from Elementor document.
+	 * @param string $element_id Target element ID.
+	 * @return array|null Settings array if found, null otherwise.
+	 */
 	private function find_element_settings( $elements, $element_id ) {
 		foreach ( $elements as $element ) {
 			if ( isset( $element['id'] ) && $element['id'] === $element_id ) {
