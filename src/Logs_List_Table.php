@@ -285,6 +285,22 @@ class Logs_List_Table extends \WP_List_Table {
 	public function column_details( $item ) {
 		$buttons = [];
 
+		// Retry button for failed submissions
+		if ( 'failed' === $item->status ) {
+			$buttons[] = sprintf(
+				'<button type="button" class="button button-small button-primary retry-submission-btn"
+					data-submission-id="%d"
+					data-actions="%s"
+					title="%s">
+					<span class="dashicons dashicons-controls-repeat" style="line-height:1.3;"></span> %s
+				</button>',
+				absint( $item->submission_id ),
+				esc_attr( $item->actions ),
+				__( 'Retry this failed submission', 'elementor-retrigger-tool' ),
+				__( 'Retry', 'elementor-retrigger-tool' )
+			);
+		}
+
 		// Debug info button
 		if ( ! empty( $item->full_debug ) ) {
 			$buttons[] = sprintf(

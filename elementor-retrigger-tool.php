@@ -132,6 +132,7 @@ class Elementor_Retrigger_Tool {
 		/* AJAX */
 		add_action( 'wp_ajax_' . self::AJAX_ACTION, [ $this, 'ajax_process_request' ] );
 		add_action( 'wp_ajax_' . self::AJAX_GET_DATA, [ $this, 'ajax_get_submission_data' ] );
+		add_action( 'wp_ajax_' . self::AJAX_ACTION . '_clone', [ $this, 'ajax_clone_submission' ] );
 
 		/* Cron & Activation */
 		add_action( self::CRON_HOOK, [ $this, 'scheduled_log_cleanup' ] );
@@ -555,8 +556,43 @@ class Elementor_Retrigger_Tool {
 					logRequestResponseModal.hide();
 				}
 			});
+
+			/* Retry failed submission */
+			$('.retry-submission-btn').on('click', function() {
+				var btn = $(this);
+				var submissionId = btn.data('submission-id');
+				var actions = btn.data('actions').split(',');
+
+				if (!confirm('Retry submission #' + submissionId + ' with actions: ' + actions.join(', ') + '?')) {
+					return;
+				}
+
+				btn.prop('disabled', true).find('.dashicons').addClass('spin');
+
+				$.post(ajaxurl, {
+					action: 'e_retrigger_process',
+					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
+					id: submissionId,
+					target_actions: actions
+				}, function(res) {
+					btn.prop('disabled', false).find('.dashicons').removeClass('spin');
+					if (res.success) {
+						alert('Success: ' + res.data.message);
+						location.reload();
+					} else {
+						alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
+					}
+				}).fail(function() {
+					btn.prop('disabled', false).find('.dashicons').removeClass('spin');
+					alert('Request failed. Please try again.');
+				});
+			});
 		});
 		</script>
+		<style>
+			.dashicons.spin { animation: spin 1s linear infinite; }
+			@keyframes spin { 100% { transform: rotate(360deg); } }
+		</style>
 		<?php
 	}
 
@@ -785,7 +821,19 @@ class Elementor_Retrigger_Tool {
 						<input type="text" id="modal_webhook_url" name="webhook_url" style="width:100%;" placeholder="https://example.com/webhook">
 					</div>
 
-					<button type="button" id="modal_run_btn" class="button button-primary button-large">Run with Changes</button>
+					<!-- Options Section -->
+					<div style="margin-bottom:20px; padding:15px; background:#f0f6fc; border:1px solid #c3c4c7; border-radius:4px;">
+						<h3 style="margin-bottom:10px; margin-top:0;">Options</h3>
+						<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+							<input type="checkbox" id="modal_create_new" name="create_new_submission">
+							<span><strong>Create as New Submission</strong> — Save modified data as a new submission entry before triggering actions</span>
+						</label>
+					</div>
+
+					<div style="display:flex; gap:10px;">
+						<button type="button" id="modal_run_btn" class="button button-primary button-large" style="flex:1;">Re-trigger with Changes</button>
+						<button type="button" id="modal_clone_btn" class="button button-secondary button-large" title="Clone this submission with modifications">Clone & Edit</button>
+					</div>
 				</form>
 			</div>
 		</div>
@@ -925,9 +973,8 @@ class Elementor_Retrigger_Tool {
 				});
 			});
 
-			/* Run with changes */
-			$('#modal_run_btn').on('click', function() {
-				var id = $('#modal_sub_id').val();
+			/* Helper function to collect form data */
+			function collectModalData() {
 				var customData = {};
 
 				/* Get all field values including custom ones */
@@ -956,28 +1003,79 @@ class Elementor_Retrigger_Tool {
 					actions.push($(this).val());
 				});
 
-				if (actions.length === 0) {
+				return {
+					id: $('#modal_sub_id').val(),
+					customData: customData,
+					actions: actions,
+					webhookUrl: $('#modal_webhook_url').val(),
+					createNew: $('#modal_create_new').is(':checked')
+				};
+			}
+
+			/* Run with changes */
+			$('#modal_run_btn').on('click', function() {
+				var data = collectModalData();
+
+				if (data.actions.length === 0) {
 					alert('Please select at least one action to execute.');
 					return;
 				}
 
-				/* Get webhook URL if applicable */
-				var webhookUrl = $('#modal_webhook_url').val();
-
-				$(this).text('Processing...').prop('disabled', true);
+				var btn = $(this);
+				btn.text('Processing...').prop('disabled', true);
 
 				$.post(ajaxurl, {
 					action: '<?php echo self::AJAX_ACTION; ?>',
 					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
-					id: id,
-					target_actions: actions,
-					custom_fields: customData,
-					webhook_url: webhookUrl
+					id: data.id,
+					target_actions: data.actions,
+					custom_fields: data.customData,
+					webhook_url: data.webhookUrl,
+					create_new_submission: data.createNew ? 1 : 0
 				}, function(res) {
-					$('#modal_run_btn').text('Run with Changes').prop('disabled', false);
+					btn.text('Re-trigger with Changes').prop('disabled', false);
 					modal.hide();
-					if (res.success) alert('Success: ' + res.data.message);
-					else alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
+					if (res.success) {
+						var msg = res.data.message;
+						if (res.data.new_submission_id) {
+							msg += '\nNew Submission ID: #' + res.data.new_submission_id;
+						}
+						alert('Success: ' + msg);
+						if (res.data.new_submission_id) {
+							location.reload(); /* Refresh to show new submission */
+						}
+					} else {
+						alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
+					}
+				});
+			});
+
+			/* Clone & Edit - Creates new submission immediately without triggering */
+			$('#modal_clone_btn').on('click', function() {
+				var data = collectModalData();
+
+				if (Object.keys(data.customData).length === 0) {
+					alert('No field data to clone.');
+					return;
+				}
+
+				var btn = $(this);
+				btn.text('Cloning...').prop('disabled', true);
+
+				$.post(ajaxurl, {
+					action: '<?php echo self::AJAX_ACTION; ?>_clone',
+					nonce: '<?php echo wp_create_nonce( self::AJAX_ACTION ); ?>',
+					id: data.id,
+					custom_fields: data.customData
+				}, function(res) {
+					btn.text('Clone & Edit').prop('disabled', false);
+					modal.hide();
+					if (res.success) {
+						alert('Cloned successfully! New Submission ID: #' + res.data.new_submission_id + '\n\nYou can now select it from the list to trigger actions.');
+						location.reload();
+					} else {
+						alert('Failed: ' + (res.data ? res.data.message : 'Unknown error'));
+					}
 				});
 			});
 
@@ -1146,6 +1244,7 @@ class Elementor_Retrigger_Tool {
 	 *
 	 * Handles both batch queue processing and individual edits.
 	 * Validates permissions, sanitizes inputs, executes actions, and logs results.
+	 * Supports creating new submission entries when create_new_submission is set.
 	 */
 	public function ajax_process_request() {
 		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
@@ -1153,13 +1252,27 @@ class Elementor_Retrigger_Tool {
 			wp_send_json_error( [ 'message' => 'Unauthorized' ] );
 		}
 
-		$id            = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
-		$actions       = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
-		$custom_fields = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
-		$webhook_url   = isset( $_POST['webhook_url'] ) ? sanitize_text_field( $_POST['webhook_url'] ) : '';
+		$id                    = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
+		$actions               = isset( $_POST['target_actions'] ) ? (array) $_POST['target_actions'] : [];
+		$custom_fields         = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : null;
+		$webhook_url           = isset( $_POST['webhook_url'] ) ? sanitize_text_field( $_POST['webhook_url'] ) : '';
+		$create_new_submission = isset( $_POST['create_new_submission'] ) && $_POST['create_new_submission'];
 
 		if ( ! $id || empty( $actions ) ) {
 			wp_send_json_error( [ 'message' => 'Invalid Data' ] );
+		}
+
+		$new_submission_id = null;
+
+		/* Create new submission if requested */
+		if ( $create_new_submission && is_array( $custom_fields ) ) {
+			$new_submission_id = $this->create_new_submission( $id, $custom_fields );
+			if ( is_wp_error( $new_submission_id ) ) {
+				wp_send_json_error( [ 'message' => 'Failed to create new submission: ' . $new_submission_id->get_error_message() ] );
+			}
+			/* Use the new submission ID for triggering */
+			$id = $new_submission_id;
+			$custom_fields = null; /* Fields are already saved in new submission */
 		}
 
 		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $webhook_url );
@@ -1197,23 +1310,33 @@ class Elementor_Retrigger_Tool {
 
 			wp_send_json_error( [ 'message' => $result->get_error_message() ] );
 		} else {
+			$message = 'Actions executed successfully';
+			if ( $new_submission_id ) {
+				$message = "New submission #$new_submission_id created. Actions executed successfully";
+			}
+
 			$response_data = [
-				'success'          => true,
-				'executed_actions' => is_array( $result ) ? $result : [],
-				'message'          => 'Actions executed successfully',
+				'success'           => true,
+				'executed_actions'  => is_array( $result ) ? $result : [],
+				'message'           => $message,
+				'new_submission_id' => $new_submission_id,
 			];
 
 			$this->log_to_db(
 				$id,
 				implode( ',', $actions ),
 				'success',
-				'Actions executed successfully',
+				$message,
 				$debug_info,
 				$request_data,
 				$response_data
 			);
 
-			wp_send_json_success( [ 'message' => implode( ', ', $result ) ] );
+			$json_response = [ 'message' => implode( ', ', $result ) ];
+			if ( $new_submission_id ) {
+				$json_response['new_submission_id'] = $new_submission_id;
+			}
+			wp_send_json_success( $json_response );
 		}
 	}
 
@@ -1255,6 +1378,144 @@ class Elementor_Retrigger_Tool {
 		}
 
 		$wpdb->insert( $table, $data );
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Create New Submission
+	/* ------------------------------------------------------------------ */
+
+	/**
+	 * Create a new submission based on an existing one with modified fields
+	 *
+	 * @param int   $source_id     Source submission ID to copy metadata from.
+	 * @param array $custom_fields Modified field data.
+	 * @return int|WP_Error New submission ID on success, WP_Error on failure.
+	 */
+	private function create_new_submission( $source_id, $custom_fields ) {
+		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
+			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
+		}
+
+		global $wpdb;
+		$submissions_table = $wpdb->prefix . 'e_submissions';
+		$values_table      = $wpdb->prefix . 'e_submissions_values';
+
+		/* Get source submission */
+		$query      = \ElementorPro\Modules\Forms\Submissions\Database\Query::get_instance();
+		$source     = $query->get_submission( $source_id );
+
+		if ( ! $source || empty( $source['data'] ) ) {
+			return new WP_Error( 'not_found', 'Source submission not found.' );
+		}
+
+		$source_data = $source['data'];
+
+		/* Insert new submission record */
+		$wpdb->insert(
+			$submissions_table,
+			[
+				'hash_id'       => wp_generate_password( 12, false ),
+				'main_meta_id'  => 0,
+				'post_id'       => $source_data['post']['id'] ?? 0,
+				'referer'       => $source_data['referer'] ?? '',
+				'referer_title' => $source_data['referer_title'] ?? '',
+				'element_id'    => $source_data['element_id'] ?? '',
+				'form_name'     => $source_data['form_name'] ?? 'Cloned Form',
+				'campaign_id'   => 0,
+				'user_id'       => get_current_user_id(),
+				'user_ip'       => $source_data['user_ip'] ?? '',
+				'user_agent'    => $source_data['user_agent'] ?? '',
+				'actions_count' => 0,
+				'actions_succeeded_count' => 0,
+				'status'        => 'new',
+				'is_read'       => 0,
+				'meta'          => '',
+				'created_at'    => current_time( 'mysql' ),
+				'updated_at'    => current_time( 'mysql' ),
+				'created_at_gmt' => current_time( 'mysql', true ),
+				'updated_at_gmt' => current_time( 'mysql', true ),
+			]
+		);
+
+		$new_submission_id = $wpdb->insert_id;
+
+		if ( ! $new_submission_id ) {
+			return new WP_Error( 'insert_failed', 'Failed to create new submission.' );
+		}
+
+		/* Insert field values */
+		$main_meta_id = 0;
+		foreach ( $custom_fields as $key => $value ) {
+			$wpdb->insert(
+				$values_table,
+				[
+					'submission_id' => $new_submission_id,
+					'key'           => sanitize_text_field( $key ),
+					'value'         => sanitize_textarea_field( $value ),
+				]
+			);
+
+			/* Use first email field as main_meta_id */
+			if ( ! $main_meta_id && ( strpos( strtolower( $key ), 'email' ) !== false || filter_var( $value, FILTER_VALIDATE_EMAIL ) ) ) {
+				$main_meta_id = $wpdb->insert_id;
+			}
+		}
+
+		/* Update main_meta_id if we found an email field */
+		if ( $main_meta_id ) {
+			$wpdb->update(
+				$submissions_table,
+				[ 'main_meta_id' => $main_meta_id ],
+				[ 'id' => $new_submission_id ]
+			);
+		}
+
+		/* Clear form names cache */
+		delete_transient( 'e_retrigger_forms' );
+
+		return $new_submission_id;
+	}
+
+	/**
+	 * AJAX handler to clone a submission without triggering actions
+	 *
+	 * Creates a new submission with modified fields that can be triggered later.
+	 */
+	public function ajax_clone_submission() {
+		check_ajax_referer( self::AJAX_ACTION, 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( [ 'message' => 'Unauthorized' ] );
+		}
+
+		$source_id     = isset( $_POST['id'] ) ? absint( $_POST['id'] ) : 0;
+		$custom_fields = isset( $_POST['custom_fields'] ) ? (array) $_POST['custom_fields'] : [];
+
+		if ( ! $source_id || empty( $custom_fields ) ) {
+			wp_send_json_error( [ 'message' => 'Invalid data provided.' ] );
+		}
+
+		$new_id = $this->create_new_submission( $source_id, $custom_fields );
+
+		if ( is_wp_error( $new_id ) ) {
+			wp_send_json_error( [ 'message' => $new_id->get_error_message() ] );
+		}
+
+		/* Log the clone action */
+		$this->log_to_db(
+			$new_id,
+			'clone',
+			'success',
+			"Cloned from submission #$source_id",
+			"Source ID: $source_id\nNew ID: $new_id\nFields: " . wp_json_encode( $custom_fields, JSON_PRETTY_PRINT ),
+			[ 'source_id' => $source_id, 'custom_fields' => $custom_fields ],
+			[ 'new_submission_id' => $new_id ]
+		);
+
+		wp_send_json_success( [
+			'message'           => "Successfully cloned submission #$source_id",
+			'new_submission_id' => $new_id,
+		] );
 	}
 
 	/* ------------------------------------------------------------------ */
