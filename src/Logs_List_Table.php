@@ -132,6 +132,13 @@ class Logs_List_Table extends \WP_List_Table {
 	public function prepare_items() {
 		global $wpdb;
 
+		// Set column headers (required for table to display rows)
+		$this->_column_headers = [
+			$this->get_columns(),
+			[], // Hidden columns
+			$this->get_sortable_columns(),
+		];
+
 		// Process bulk actions first
 		$this->process_bulk_action();
 
