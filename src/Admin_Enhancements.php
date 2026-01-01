@@ -264,9 +264,12 @@ class Admin_Enhancements {
 		global $wpdb;
 		$table = $wpdb->prefix . 'e_retrigger_logs';
 
-		$total_logs = $wpdb->get_var( "SELECT COUNT(*) FROM $table" );
-		$success_logs = $wpdb->get_var( "SELECT COUNT(*) FROM $table WHERE status = 'success'" );
-		$failed_logs = $wpdb->get_var( "SELECT COUNT(*) FROM $table WHERE status = 'failed'" );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+		$total_logs = $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+		$success_logs = $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'success'" );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+		$failed_logs = $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE status = 'failed'" );
 
 		?>
 		<table class="widefat">
@@ -306,7 +309,8 @@ class Admin_Enhancements {
 
 		global $wpdb;
 		$table = $wpdb->prefix . 'e_retrigger_logs';
-		$logs = $wpdb->get_results( "SELECT * FROM $table ORDER BY created_at DESC", ARRAY_A );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+		$logs = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY created_at DESC", ARRAY_A );
 
 		$format = isset( $_GET['format'] ) ? sanitize_text_field( $_GET['format'] ) : 'json';
 

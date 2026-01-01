@@ -1119,9 +1119,10 @@ class Elementor_Retrigger_Tool {
 					/* Get all action logs for this submission to show what was actually executed */
 					global $wpdb;
 					$logs_table = $wpdb->prefix . 'e_submissions_actions_log';
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
 					$executed_actions = $wpdb->get_results(
 						$wpdb->prepare(
-							"SELECT DISTINCT action_name FROM $logs_table WHERE submission_id = %d ORDER BY id DESC",
+							"SELECT DISTINCT action_name FROM {$logs_table} WHERE submission_id = %d ORDER BY id DESC",
 							$id
 						),
 						ARRAY_A
@@ -1573,9 +1574,20 @@ class Elementor_Retrigger_Tool {
 		$table      = $wpdb->prefix . 'e_submissions';
 		$val_table  = $wpdb->prefix . 'e_submissions_values';
 
-		if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) != $table ) {
+		// Check if table exists using prepared statement
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
 			return [ 'rows' => [], 'total' => 0 ];
 		}
+
+		// Validate orderby against allowlist
+		$valid_orderby = [ 'id', 'created_at', 'form_name' ];
+		if ( ! in_array( $orderby, $valid_orderby, true ) ) {
+			$orderby = 'created_at';
+		}
+
+		// Validate order direction
+		$order = strtoupper( $order ) === 'ASC' ? 'ASC' : 'DESC';
 
 		$where = 'WHERE 1=1';
 		$args  = [];
@@ -1598,17 +1610,23 @@ class Elementor_Retrigger_Tool {
 			}
 		}
 
-		$count_sql = "SELECT COUNT(DISTINCT s.id) FROM $table s LEFT JOIN $val_table v ON s.main_meta_id = v.id $where";
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table names are safely constructed from $wpdb->prefix
+		$count_sql = "SELECT COUNT(DISTINCT s.id) FROM {$table} s LEFT JOIN {$val_table} v ON s.main_meta_id = v.id {$where}";
 		if ( ! empty( $args ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query is prepared with args
 			$count_sql = $wpdb->prepare( $count_sql, $args );
 		}
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query is prepared above when args exist
 		$total = $wpdb->get_var( $count_sql );
 
 		$offset = ( $paged - 1 ) * self::PER_PAGE;
-		$sql    = "SELECT DISTINCT s.id, s.form_name, s.created_at, v.value as email FROM $table s LEFT JOIN $val_table v ON s.main_meta_id = v.id $where ORDER BY s.$orderby $order LIMIT %d OFFSET %d";
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table names from $wpdb->prefix, orderby/order validated above
+		$sql    = "SELECT DISTINCT s.id, s.form_name, s.created_at, v.value as email FROM {$table} s LEFT JOIN {$val_table} v ON s.main_meta_id = v.id {$where} ORDER BY s.{$orderby} {$order} LIMIT %d OFFSET %d";
 		$query_args = array_merge( $args, [ self::PER_PAGE, $offset ] );
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query uses prepare with placeholders
 		$sql = $wpdb->prepare( $sql, $query_args );
 
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query is fully prepared above
 		return [ 'rows' => $wpdb->get_results( $sql ), 'total' => $total ];
 	}
 
@@ -1651,13 +1669,16 @@ class Elementor_Retrigger_Tool {
 	 * @return array Array of form names.
 	 */
 	private function get_unique_forms() {
-		if ( false === ( $forms = get_transient( 'e_retrigger_forms' ) ) ) {
+		$forms = get_transient( 'e_retrigger_forms' );
+		if ( false === $forms ) {
 			global $wpdb;
 			$table = $wpdb->prefix . 'e_submissions';
-			if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) != $table ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+			if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
 				return [];
 			}
-			$forms = $wpdb->get_col( "SELECT DISTINCT form_name FROM $table ORDER BY form_name ASC" );
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name is safely constructed from $wpdb->prefix
+			$forms = $wpdb->get_col( "SELECT DISTINCT form_name FROM {$table} ORDER BY form_name ASC" );
 			set_transient( 'e_retrigger_forms', $forms, 12 * HOUR_IN_SECONDS );
 		}
 		return $forms;

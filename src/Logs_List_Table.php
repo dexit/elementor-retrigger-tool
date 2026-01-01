@@ -109,7 +109,8 @@ class Logs_List_Table extends \WP_List_Table {
 				$log_ids = array_map( 'absint', $_POST['log'] );
 				if ( ! empty( $log_ids ) ) {
 					$placeholders = implode( ',', array_fill( 0, count( $log_ids ), '%d' ) );
-					$wpdb->query( $wpdb->prepare( "DELETE FROM {$this->table_name} WHERE id IN ($placeholders)", $log_ids ) );
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix, placeholders dynamically generated
+					$wpdb->query( $wpdb->prepare( "DELETE FROM {$this->table_name} WHERE id IN ({$placeholders})", $log_ids ) );
 
 					add_settings_error(
 						'e_retrigger',
@@ -177,19 +178,22 @@ class Logs_List_Table extends \WP_List_Table {
 		$where_sql = ! empty( $where ) ? ' WHERE ' . implode( ' AND ', $where ) : '';
 
 		// Get total items
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Table name from $wpdb->prefix, where clause uses placeholders
 		$total_items = $wpdb->get_var(
 			empty( $params )
-				? "SELECT COUNT(*) FROM {$this->table_name} $where_sql"
-				: $wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name} $where_sql", $params )
+				? "SELECT COUNT(*) FROM {$this->table_name} {$where_sql}"
+				: $wpdb->prepare( "SELECT COUNT(*) FROM {$this->table_name} {$where_sql}", $params )
 		);
 
 		// Calculate offset
 		$offset = ( $paged - 1 ) * $this->per_page;
 
-		// Get items
-		$sql          = "SELECT * FROM {$this->table_name} $where_sql ORDER BY $orderby $order LIMIT %d OFFSET %d";
+		// Get items - orderby/order validated above, table name from $wpdb->prefix
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- All variables are validated/escaped
+		$sql          = "SELECT * FROM {$this->table_name} {$where_sql} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d";
 		$params[]     = $this->per_page;
 		$params[]     = $offset;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Query uses prepare with placeholders
 		$this->items = $wpdb->get_results( $wpdb->prepare( $sql, $params ) );
 
 		// Set pagination
