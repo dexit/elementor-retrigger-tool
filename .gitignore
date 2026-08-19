@@ -1,0 +1,42 @@
+# WordPress
+wp-config.php
+wp-content/uploads/
+wp-content/cache/
+wp-content/backups/
+wp-content/upgrade/
+wp-content/backup-db/
+
+# Plugin dependencies
+vendor/
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+error_log
+debug.log
+
+# Temp
+*.tmp
+*.temp
+.cache/
+
+# Elementor Pro source (reference only, don't modify)
+.claude/resources/elementor-pro-421-base/
+
+# Keep plugin files
+!elementor-retrigger-tool.php
+!README.md
+!LICENSE
+!screenshots/
