@@ -4,7 +4,7 @@ Donate link: https://example.com/donate
 Tags: elementor, forms, bulk, re‑trigger, cron, logs
 Requires at least: 6.0
 Tested up to: 6.5
-Stable tag: 10.0.0
+Stable tag: 11.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,6 +36,8 @@ A: Absolutely. The plugin is safe to use on any WordPress installation that has 
 A: Go to **Elementor → Re‑Trigger Tool → Settings** and set the desired number of days.
 
 ## Changelog
+* 11.0.1 – Fix: Webhook URL override now works correctly (changed `webhook_url` to `webhooks` to match Elementor Pro).
+* 11.0.0 – Added action settings modal, request/response logging, webhook debug capture.
 * 10.0.0 – Initial release (full payload logging, cron cleanup, visual queue, modal editing, auto‑save).
 
 ## Upgrade Notice

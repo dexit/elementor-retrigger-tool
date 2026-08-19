@@ -3,7 +3,7 @@
  * Plugin Name: Elementor Submission Re‑Trigger Tool
  * Plugin URI:  https://example.com/elementor-retrigger-tool
  * Description: Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
- * Version:     11.0.0
+ * Version:     11.0.1
  * Author:      Custom Extension
  * Author URI:  https://example.com
  * Text Domain: elementor-retrigger-tool
@@ -602,7 +602,7 @@ class Elementor_Retrigger_Tool {
 						<div class="actions-tab-content" data-tab="webhook" style="display:none;">
 							<div class="e-retrigger-field-row">
 								<label>Webhook URL</label>
-								<input type="text" name="webhook_url" placeholder="https://example.com/webhook">
+								<input type="text" name="webhooks" placeholder="https://example.com/webhook">
 							</div>
 						</div>
 
@@ -845,7 +845,7 @@ class Elementor_Retrigger_Tool {
 					if (res.success) {
 						// Populate form fields with current settings
 						var settings = res.data;
-						$('input[name="webhook_url"]').val(settings.webhook_url || '');
+						$('input[name="webhooks"]').val(settings.webhooks || '');
 						$('input[name="email_to"]').val(settings.email_to || '');
 						$('input[name="email_subject"]').val(settings.email_subject || '');
 						$('input[name="email_from"]').val(settings.email_from || '');
@@ -1058,7 +1058,7 @@ class Elementor_Retrigger_Tool {
 
 		// Return relevant action settings
 		$action_settings = [
-			'webhook_url'         => $widget_settings['webhook_url'] ?? '',
+			'webhooks'            => $widget_settings['webhooks'] ?? '',
 			'email_to'            => $widget_settings['email_to'] ?? '',
 			'email_subject'       => $widget_settings['email_subject'] ?? '',
 			'email_from'          => $widget_settings['email_from'] ?? '',
@@ -1247,8 +1247,8 @@ class Elementor_Retrigger_Tool {
 					$this->response_data = [];
 
 					// Store the payload being sent
-					if ( 'webhook' === $action_slug && ! empty( $widget_settings['webhook_url'] ) ) {
-						$this->request_data['webhook_url'] = $widget_settings['webhook_url'];
+					if ( 'webhook' === $action_slug && ! empty( $widget_settings['webhooks'] ) ) {
+						$this->request_data['webhooks'] = $widget_settings['webhooks'];
 						$this->request_data['form_data'] = $formatted_fields;
 					}
 					if ( 'email' === $action_slug ) {
