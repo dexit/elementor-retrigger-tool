@@ -3,7 +3,7 @@
  * Plugin Name: Elementor Submission Re‑Trigger Tool
  * Plugin URI:  https://example.com/elementor-retrigger-tool
  * Description: Bulk re‑trigger Elementor Pro form submissions with a visual queue, edit‑payload modal, auto‑save, full payload logging, cron cleanup, and more.
- * Version:     11.0.1
+ * Version:     12.0.0
  * Author:      Custom Extension
  * Author URI:  https://example.com
  * Text Domain: elementor-retrigger-tool
@@ -33,6 +33,11 @@ class Elementor_Retrigger_Tool {
 	const CRON_HOOK             = 'e_retrigger_daily_cleanup_event';
 	const PER_PAGE              = 20;
 
+	// Form type constants
+	const FORM_TYPE_CLASSIC     = 'classic';
+	const FORM_TYPE_ATOMIC      = 'atomic';
+	const ATOMIC_FORM_WIDGET    = 'e-form';
+
 	/* ------------------------------------------------------------------ */
 	/*  Properties
 	/* ------------------------------------------------------------------ */
@@ -41,6 +46,10 @@ class Elementor_Retrigger_Tool {
 	private $request_data = [];
 	private $response_data = [];
 	private $action_settings_used = [];
+	private $form_type = self::FORM_TYPE_CLASSIC;
+	private $form_name = '';
+	private $execution_start_time = 0;
+	private $action_timings = [];
 
 	/* ------------------------------------------------------------------ */
 	/*  Constructor
@@ -831,6 +840,10 @@ class Elementor_Retrigger_Tool {
 				var id = $(this).data('id');
 				$('#actions_modal_sub_id').val(id);
 				$('#actions_modal_loading').show();
+
+				// Clear previous form info badge
+				$('#form_type_badge').remove();
+
 				actionsModal.show();
 
 				// Show first tab by default
@@ -845,6 +858,17 @@ class Elementor_Retrigger_Tool {
 					if (res.success) {
 						// Populate form fields with current settings
 						var settings = res.data;
+
+						// Show form type badge
+						var formType = settings._form_type || 'classic';
+						var formName = settings._form_name || 'Unknown Form';
+						var badgeColor = formType === 'atomic' ? '#9b59b6' : '#3498db';
+						var formInfoHtml = '<div id="form_type_badge" style="margin-bottom:15px;padding:10px;background:#f5f5f5;border-radius:4px;">' +
+							'<span style="background:' + badgeColor + ';color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;text-transform:uppercase;margin-right:8px;">' + formType + '</span>' +
+							'<strong>' + formName + '</strong>' +
+							'</div>';
+						$('#actions_modal_form').prepend(formInfoHtml);
+
 						$('input[name="webhooks"]').val(settings.webhooks || '');
 						$('input[name="email_to"]').val(settings.email_to || '');
 						$('input[name="email_subject"]').val(settings.email_subject || '');
@@ -1049,17 +1073,35 @@ class Elementor_Retrigger_Tool {
 			wp_send_json_error( [ 'message' => 'Original page no longer exists' ] );
 		}
 
-		$elements_data   = $document->get_elements_data();
-		$widget_settings = $this->find_element_settings( $elements_data, $element_id );
+		$elements_data = $document->get_elements_data();
+
+		// Get full element data to detect form type
+		$element_data  = $this->find_element_data( $elements_data, $element_id );
+		$form_type     = $this->detect_form_type( $element_data );
+		$widget_settings = $element_data['settings'] ?? [];
 
 		if ( ! $widget_settings ) {
 			wp_send_json_error( [ 'message' => 'Form widget not found' ] );
 		}
 
-		// Return relevant action settings
+		// Get webhook URL based on form type
+		$webhook_url_key = $this->get_webhook_url_key( $form_type );
+		$webhook_url = $widget_settings[ $webhook_url_key ] ?? '';
+
+		// For atomic forms, also check alternate key
+		if ( empty( $webhook_url ) && $form_type === self::FORM_TYPE_ATOMIC ) {
+			$webhook_url = $widget_settings['webhooks'] ?? '';
+		}
+		if ( empty( $webhook_url ) && $form_type === self::FORM_TYPE_CLASSIC ) {
+			$webhook_url = $widget_settings['webhook_url'] ?? '';
+		}
+
+		// Return relevant action settings with form type info
 		$action_settings = [
-			'webhooks'            => $widget_settings['webhooks'] ?? '',
-			'email_to'            => $widget_settings['email_to'] ?? '',
+			'_form_type'          => $form_type,
+			'_form_name'          => $data['form_name'] ?? ( $widget_settings['form_name'] ?? '' ),
+			'webhooks'            => $webhook_url, // Always use 'webhooks' key in response for UI consistency
+			'email_to'            => $widget_settings['email_to'] ?? ( $widget_settings['email'] ?? '' ),
 			'email_subject'       => $widget_settings['email_subject'] ?? '',
 			'email_from'          => $widget_settings['email_from'] ?? '',
 			'email_from_name'     => $widget_settings['email_from_name'] ?? '',
@@ -1097,25 +1139,57 @@ class Elementor_Retrigger_Tool {
 			wp_send_json_error( [ 'message' => 'Invalid Data' ] );
 		}
 
+		// Reset state for new execution
+		$this->form_type = self::FORM_TYPE_CLASSIC;
+		$this->form_name = '';
+		$this->action_timings = [];
+
 		$result = $this->execute_retrigger( $id, $actions, $custom_fields, $custom_action_settings );
 
-		/* Prepare debug info (error or payload) */
-		$debug_info = $this->webhook_debug_info;
-		if ( is_array( $custom_fields ) ) {
-			$debug_info = "EDITED PAYLOAD:\n" . json_encode( $custom_fields, JSON_PRETTY_PRINT ) . "\n\n" . $debug_info;
+		/* Prepare enhanced debug info */
+		$debug_info = "FORM INFO:\n";
+		$debug_info .= "  Form Name: " . $this->form_name . "\n";
+		$debug_info .= "  Form Type: " . strtoupper( $this->form_type ) . "\n";
+		$debug_info .= "  Submission ID: #" . $id . "\n";
+		$debug_info .= "\nEXECUTION TIMING:\n";
+		foreach ( $this->action_timings as $action => $timing ) {
+			$debug_info .= "  " . $action . ": " . $timing . "\n";
 		}
 
-		// Prepare request/response data for logging
-		$request_data  = ! empty( $this->request_data ) ? json_encode( $this->request_data, JSON_PRETTY_PRINT ) : '';
-		$response_data = ! empty( $this->response_data ) ? json_encode( $this->response_data, JSON_PRETTY_PRINT ) : '';
+		if ( $this->webhook_debug_info ) {
+			$debug_info .= "\nWEBHOOK DEBUG:\n" . $this->webhook_debug_info;
+		}
+
+		if ( is_array( $custom_fields ) ) {
+			$debug_info .= "\n\nEDITED PAYLOAD:\n" . json_encode( $custom_fields, JSON_PRETTY_PRINT );
+		}
+
+		// Prepare enhanced request/response data for logging
+		$request_data_arr = $this->request_data;
+		$request_data_arr['_meta'] = [
+			'form_type'     => $this->form_type,
+			'form_name'     => $this->form_name,
+			'submission_id' => $id,
+			'timestamp'     => current_time( 'mysql' ),
+		];
+		$request_data  = ! empty( $request_data_arr ) ? json_encode( $request_data_arr, JSON_PRETTY_PRINT ) : '';
+
+		$response_data_arr = $this->response_data;
+		if ( ! empty( $this->action_timings ) ) {
+			$response_data_arr['_timings'] = $this->action_timings;
+		}
+		$response_data = ! empty( $response_data_arr ) ? json_encode( $response_data_arr, JSON_PRETTY_PRINT ) : '';
+
 		$action_settings_log = ! empty( $this->action_settings_used ) ? json_encode( $this->action_settings_used, JSON_PRETTY_PRINT ) : '';
 
 		if ( is_wp_error( $result ) ) {
-			$this->log_to_db( $id, implode( ',', $actions ), 'failed', $result->get_error_message(), $debug_info, $request_data, $response_data, $action_settings_log );
-			wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+			$error_message = $result->get_error_message();
+			$this->log_to_db( $id, implode( ',', $actions ), 'failed', '[' . strtoupper( $this->form_type ) . '] ' . $error_message, $debug_info, $request_data, $response_data, $action_settings_log );
+			wp_send_json_error( [ 'message' => $error_message ] );
 		} else {
-			$this->log_to_db( $id, implode( ',', $actions ), 'success', 'Actions executed successfully', $debug_info, $request_data, $response_data, $action_settings_log );
-			wp_send_json_success( [ 'message' => implode( ', ', $result ) ] );
+			$success_msg = implode( ', ', $result );
+			$this->log_to_db( $id, implode( ',', $actions ), 'success', '[' . strtoupper( $this->form_type ) . '] ' . $success_msg, $debug_info, $request_data, $response_data, $action_settings_log );
+			wp_send_json_success( [ 'message' => $success_msg . ' (' . ( $this->action_timings['total_ms'] ?? '?' ) . 'ms)' ] );
 		}
 	}
 
@@ -1145,6 +1219,10 @@ class Elementor_Retrigger_Tool {
 	/*  Execute retrigger
 	/* ------------------------------------------------------------------ */
 	private function execute_retrigger( $submission_id, $target_actions, $custom_fields = null, $custom_action_settings = null ) {
+		// Start timing
+		$this->execution_start_time = microtime( true );
+		$this->action_timings = [];
+
 		if ( ! class_exists( '\ElementorPro\Modules\Forms\Submissions\Database\Query' ) ) {
 			return new WP_Error( 'missing_dep', 'Elementor Pro Submissions module missing.' );
 		}
@@ -1169,6 +1247,16 @@ class Elementor_Retrigger_Tool {
 			}
 		}
 
+		// Build field metadata for atomic forms
+		$field_metadata = [];
+		$values = isset( $data['values'] ) ? $data['values'] : [];
+		foreach ( $values as $val ) {
+			$field_metadata[ $val['key'] ] = [
+				'label' => $val['key'],
+				'type'  => 'text',
+			];
+		}
+
 		$meta_data = [
 			'remote_ip'     => [ 'value' => $data['user_ip'] ?? '', 'title' => 'Remote IP' ],
 			'user_agent'    => [ 'value' => $data['user_agent'] ?? '', 'title' => 'User Agent' ],
@@ -1190,10 +1278,18 @@ class Elementor_Retrigger_Tool {
 		}
 
 		$elements_data   = $document->get_elements_data();
-		$widget_settings = $this->find_element_settings( $elements_data, $element_id );
+
+		// Get full element data to detect form type
+		$element_data    = $this->find_element_data( $elements_data, $element_id );
+		$this->form_type = $this->detect_form_type( $element_data );
+
+		$widget_settings = $element_data['settings'] ?? [];
 		if ( ! $widget_settings ) {
 			return new WP_Error( 'no_widget', "Form Widget not found." );
 		}
+
+		// Store form name for logging
+		$this->form_name = $data['form_name'] ?? ( $widget_settings['form_name'] ?? 'Unknown Form' );
 
 		$this->sanitize_settings( $widget_settings, $element_id );
 
@@ -1208,6 +1304,72 @@ class Elementor_Retrigger_Tool {
 			$this->action_settings_used = $custom_action_settings;
 		}
 
+		// Get the correct keys based on form type
+		$submit_actions_key = $this->get_submit_actions_key( $this->form_type );
+		$webhook_url_key    = $this->get_webhook_url_key( $this->form_type );
+
+		// Hook into webhooks to capture request/response (both classic and atomic)
+		add_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ], 10, 2 );
+		add_filter( 'elementor_pro/atomic_forms/webhooks/request_args', [ $this, 'capture_atomic_request' ], 10, 4 );
+		add_filter( 'http_request_args', [ $this, 'capture_request_data' ], 10, 2 );
+		add_action( 'http_api_debug', [ $this, 'capture_response_data' ], 10, 5 );
+
+		$executed = [];
+
+		// Execute based on form type
+		if ( $this->form_type === self::FORM_TYPE_ATOMIC ) {
+			$executed = $this->execute_atomic_actions(
+				$submission_id,
+				$target_actions,
+				$formatted_fields,
+				$widget_settings,
+				$post_id,
+				$element_id,
+				$field_metadata,
+				$meta_data,
+				$query,
+				$submit_actions_key,
+				$webhook_url_key
+			);
+		} else {
+			$executed = $this->execute_classic_actions(
+				$submission_id,
+				$target_actions,
+				$formatted_fields,
+				$widget_settings,
+				$post_id,
+				$element_id,
+				$meta_data,
+				$query,
+				$submit_actions_key,
+				$webhook_url_key
+			);
+		}
+
+		// Cleanup hooks
+		remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
+		remove_filter( 'elementor_pro/atomic_forms/webhooks/request_args', [ $this, 'capture_atomic_request' ] );
+		remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
+		remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
+
+		// Calculate total execution time
+		$total_time = round( ( microtime( true ) - $this->execution_start_time ) * 1000, 2 );
+		$this->action_timings['total_ms'] = $total_time;
+
+		if ( is_wp_error( $executed ) ) {
+			return $executed;
+		}
+
+		if ( empty( $executed ) ) {
+			return new WP_Error( 'no_run', 'No matching enabled actions found. Form type: ' . $this->form_type . ', Actions key: ' . $submit_actions_key );
+		}
+		return $executed;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Execute Classic Form Actions
+	/* ------------------------------------------------------------------ */
+	private function execute_classic_actions( $submission_id, $target_actions, $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data, $query, $submit_actions_key, $webhook_url_key ) {
 		$mock_record = $this->create_mock_record( $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data );
 		$mock_ajax   = new class {
 			public $data = [];
@@ -1224,18 +1386,14 @@ class Elementor_Retrigger_Tool {
 		$executed          = [];
 		$actions_registry  = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' )->get_form_actions();
 
-		// Hook into webhooks to capture request/response
-		add_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ], 10, 2 );
-		add_filter( 'http_request_args', [ $this, 'capture_request_data' ], 10, 2 );
-		add_action( 'http_api_debug', [ $this, 'capture_response_data' ], 10, 5 );
-
 		foreach ( $target_actions as $action_slug ) {
-			$enabled_actions = $widget_settings['submit_actions'] ?? [];
+			$enabled_actions = $widget_settings[ $submit_actions_key ] ?? [];
 			if ( ! in_array( $action_slug, $enabled_actions, true ) ) {
 				continue;
 			}
 			$action_instance = $actions_registry[ $action_slug ] ?? null;
 			if ( $action_instance ) {
+				$action_start = microtime( true );
 				try {
 					if ( 'activity-log' === $action_slug && ! function_exists( 'aal_insert_log' ) ) {
 						continue;
@@ -1247,8 +1405,8 @@ class Elementor_Retrigger_Tool {
 					$this->response_data = [];
 
 					// Store the payload being sent
-					if ( 'webhook' === $action_slug && ! empty( $widget_settings['webhooks'] ) ) {
-						$this->request_data['webhooks'] = $widget_settings['webhooks'];
+					if ( 'webhook' === $action_slug && ! empty( $widget_settings[ $webhook_url_key ] ) ) {
+						$this->request_data[ $webhook_url_key ] = $widget_settings[ $webhook_url_key ];
 						$this->request_data['form_data'] = $formatted_fields;
 					}
 					if ( 'email' === $action_slug ) {
@@ -1265,30 +1423,171 @@ class Elementor_Retrigger_Tool {
 					$action_instance->run( $mock_record, $mock_ajax );
 					$query->add_action_log( $submission_id, $action_instance, 'success', 'Manual Re‑trigger via Tool' );
 					$executed[] = $action_slug;
+
+					$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms';
 				} catch ( \Exception $e ) {
 					$error_msg = $this->webhook_debug_info ? $this->webhook_debug_info : $e->getMessage();
 					$query->add_action_log( $submission_id, $action_instance, 'failed', 'Manual Re‑trigger Failed: ' . $error_msg );
 					if ( empty( $this->webhook_debug_info ) ) {
 						$this->webhook_debug_info = $e->getMessage();
 					}
-					// Cleanup hooks before returning
-					remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
-					remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
-					remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
+					$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms (failed)';
 					return new WP_Error( 'action_fail', "$action_slug failed: $error_msg" );
 				}
 			}
 		}
 
-		// Cleanup hooks
-		remove_action( 'elementor_pro/forms/webhooks/response', [ $this, 'capture_webhook_error' ] );
-		remove_filter( 'http_request_args', [ $this, 'capture_request_data' ] );
-		remove_action( 'http_api_debug', [ $this, 'capture_response_data' ] );
-
-		if ( empty( $executed ) ) {
-			return new WP_Error( 'no_run', 'No matching enabled actions found.' );
-		}
 		return $executed;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Execute Atomic Form Actions
+	/* ------------------------------------------------------------------ */
+	private function execute_atomic_actions( $submission_id, $target_actions, $formatted_fields, $widget_settings, $post_id, $element_id, $field_metadata, $meta_data, $query, $submit_actions_key, $webhook_url_key ) {
+		// Check if Atomic Form Action Runner exists
+		if ( ! class_exists( '\ElementorPro\Modules\AtomicForm\Actions\Action_Runner' ) ) {
+			// Fallback to classic if atomic module not available
+			return $this->execute_classic_actions(
+				$submission_id,
+				$target_actions,
+				$formatted_fields,
+				$widget_settings,
+				$post_id,
+				$element_id,
+				$meta_data,
+				$query,
+				'submit_actions', // Try classic key
+				'webhooks'
+			);
+		}
+
+		$executed = [];
+
+		// Build context for atomic actions
+		$context = [
+			'post_id'        => $post_id,
+			'form_id'        => $element_id,
+			'form_name'      => $this->form_name,
+			'field_metadata' => $field_metadata,
+			'referer_title'  => $meta_data['page_title']['value'] ?? '',
+			'referrer'       => $meta_data['page_url']['value'] ?? '',
+			'submission_id'  => $submission_id,
+		];
+
+		foreach ( $target_actions as $action_slug ) {
+			$enabled_actions = $widget_settings[ $submit_actions_key ] ?? [];
+			if ( ! in_array( $action_slug, $enabled_actions, true ) ) {
+				// Also check classic key as fallback
+				$enabled_actions_classic = $widget_settings['submit_actions'] ?? [];
+				if ( ! in_array( $action_slug, $enabled_actions_classic, true ) ) {
+					continue;
+				}
+			}
+
+			$action_start = microtime( true );
+
+			// Reset request/response data for each action
+			$this->request_data = [];
+			$this->response_data = [];
+			$this->webhook_debug_info = '';
+
+			// Store the payload being sent
+			if ( 'webhook' === $action_slug && ! empty( $widget_settings[ $webhook_url_key ] ) ) {
+				$this->request_data[ $webhook_url_key ] = $widget_settings[ $webhook_url_key ];
+				$this->request_data['form_data'] = $formatted_fields;
+			}
+			if ( 'email' === $action_slug ) {
+				$this->request_data['email_to'] = $widget_settings['email_to'] ?? ( $widget_settings['email'] ?? '' );
+				$this->request_data['email_subject'] = $widget_settings['email_subject'] ?? '';
+				$this->request_data['form_data'] = $formatted_fields;
+			}
+
+			try {
+				// Try to get action from Atomic runner
+				$action = \ElementorPro\Modules\AtomicForm\Actions\Action_Runner::create_action( $action_slug );
+
+				if ( $action ) {
+					$result = $action->execute( $formatted_fields, $widget_settings, $context );
+
+					if ( isset( $result['status'] ) && 'success' === $result['status'] ) {
+						$executed[] = $action_slug;
+						$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms';
+					} else {
+						$error_msg = $result['error'] ?? 'Unknown error';
+						$this->webhook_debug_info = $error_msg;
+						$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms (failed)';
+						return new WP_Error( 'action_fail', "$action_slug failed: $error_msg" );
+					}
+				} else {
+					// Fallback to classic action if atomic version not found
+					$classic_result = $this->execute_single_classic_action(
+						$action_slug,
+						$submission_id,
+						$formatted_fields,
+						$widget_settings,
+						$post_id,
+						$element_id,
+						$meta_data,
+						$query,
+						$webhook_url_key
+					);
+					if ( is_wp_error( $classic_result ) ) {
+						return $classic_result;
+					}
+					if ( $classic_result ) {
+						$executed[] = $action_slug;
+						$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms';
+					}
+				}
+			} catch ( \Exception $e ) {
+				$this->webhook_debug_info = $e->getMessage();
+				$this->action_timings[ $action_slug ] = round( ( microtime( true ) - $action_start ) * 1000, 2 ) . 'ms (failed)';
+				return new WP_Error( 'action_fail', "$action_slug failed: " . $e->getMessage() );
+			}
+		}
+
+		return $executed;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Execute single classic action (helper for atomic fallback)
+	/* ------------------------------------------------------------------ */
+	private function execute_single_classic_action( $action_slug, $submission_id, $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data, $query, $webhook_url_key ) {
+		$actions_registry = \ElementorPro\Plugin::instance()->modules_manager->get_modules( 'forms' )->get_form_actions();
+		$action_instance  = $actions_registry[ $action_slug ] ?? null;
+
+		if ( ! $action_instance ) {
+			return false;
+		}
+
+		$mock_record = $this->create_mock_record( $formatted_fields, $widget_settings, $post_id, $element_id, $meta_data );
+		$mock_ajax   = new class {
+			public $data = [];
+			public function add_response_data( $k, $d ) { $this->data[ $k ] = $d; }
+			public function add_admin_error_message( $m ) {}
+			public function add_error_message( $m ) {}
+			public function get_current_form() { return [ 'id' => 'mock' ]; }
+		};
+
+		try {
+			$action_instance->run( $mock_record, $mock_ajax );
+			$query->add_action_log( $submission_id, $action_instance, 'success', 'Manual Re‑trigger via Tool (Atomic fallback)' );
+			return true;
+		} catch ( \Exception $e ) {
+			$error_msg = $e->getMessage();
+			$query->add_action_log( $submission_id, $action_instance, 'failed', 'Manual Re‑trigger Failed: ' . $error_msg );
+			$this->webhook_debug_info = $error_msg;
+			return new WP_Error( 'action_fail', "$action_slug failed: $error_msg" );
+		}
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Capture atomic webhook request
+	/* ------------------------------------------------------------------ */
+	public function capture_atomic_request( $args, $form_data, $widget_settings, $context ) {
+		$this->request_data['atomic_webhook_args'] = $args;
+		$this->request_data['form_data'] = $form_data;
+		return $args;
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -1540,6 +1839,57 @@ class Elementor_Retrigger_Tool {
 			}
 		}
 		return null;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Find element data (full element including widgetType)
+	/* ------------------------------------------------------------------ */
+	private function find_element_data( $elements, $element_id ) {
+		foreach ( $elements as $element ) {
+			if ( isset( $element['id'] ) && $element['id'] === $element_id ) {
+				return $element;
+			}
+			if ( ! empty( $element['elements'] ) ) {
+				$found = $this->find_element_data( $element['elements'], $element_id );
+				if ( $found ) {
+					return $found;
+				}
+			}
+		}
+		return null;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Detect form type (Classic vs Atomic)
+	/* ------------------------------------------------------------------ */
+	private function detect_form_type( $element_data ) {
+		if ( empty( $element_data ) || ! isset( $element_data['widgetType'] ) ) {
+			return self::FORM_TYPE_CLASSIC;
+		}
+
+		$widget_type = $element_data['widgetType'];
+
+		// Atomic form uses 'e-form' widget type
+		if ( $widget_type === self::ATOMIC_FORM_WIDGET ) {
+			return self::FORM_TYPE_ATOMIC;
+		}
+
+		// Classic form uses 'form' widget type
+		return self::FORM_TYPE_CLASSIC;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Get submit actions key based on form type
+	/* ------------------------------------------------------------------ */
+	private function get_submit_actions_key( $form_type ) {
+		return $form_type === self::FORM_TYPE_ATOMIC ? 'actions-after-submit' : 'submit_actions';
+	}
+
+	/* ------------------------------------------------------------------ */
+	/*  Get webhook URL key based on form type
+	/* ------------------------------------------------------------------ */
+	private function get_webhook_url_key( $form_type ) {
+		return $form_type === self::FORM_TYPE_ATOMIC ? 'webhook_url' : 'webhooks';
 	}
 }
 
